@@ -1,14 +1,19 @@
 [package]
-name = "opus-ng"
+name = "opus-native"
 version = "0.1.0"
 authors = ["Nils Hasenbanck <nils@hasenbanck.de>"]
-description = "A Rust native implementation of the audio codec Opus."
+description = "Implements the free and open audio codec Opus in Rust."
 license = "BSD-3-Clause"
 readme = "README.md"
-repository = "https://github.com/hasenbanck/matroska-demuxer"
+repository = "https://github.com/hasenbanck/opus-native"
 categories = ["multimedia"]
 keywords = ["opus", "audio", "codec", "decoder", "encoder"]
 edition = "2018"
+
+[features]
+encoder = []
+decoder = []
+ogg = []
 
 [dependencies]
 

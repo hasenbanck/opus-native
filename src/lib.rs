@@ -4,4 +4,13 @@
 #![deny(clippy::as_conversions)]
 #![deny(clippy::panic)]
 #![deny(clippy::unwrap_used)]
-//! A Rust native implementation of the audio codec Opus.
+//! Implements the free and open audio codec Opus in Rust.
+
+#[cfg(feature = "decoder")]
+mod decoder;
+
+#[cfg(feature = "encoder")]
+mod encoder;
+
+#[cfg(feature = "ogg")]
+mod ogg;
