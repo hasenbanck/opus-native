@@ -8,14 +8,26 @@
 
 Implements the free and open audio codec Opus in Rust.
 
-# Status
+## Status
 
 This crate is under heavy development. Most functionality is not working.
 
+### TODO
+
+* Decoder
+* Encoder
+* SIMD optimization
+* Repacketizer
+* Multistream decoder
+* Multistream encoder
+
 ## Credits
 
-This crate is a direct port of the Opus reference implementation specified in the following
-specifications:
+This crate is a direct port of the Opus reference implementation written in C:
+
+[Reference implementation](https://gitlab.xiph.org/xiph/opus)
+
+It implements the following specifications:
 
 * [rfc6716](https://tools.ietf.org/html/rfc6716.html)
 * [rfc7845](https://tools.ietf.org/html/rfc7845.html)
