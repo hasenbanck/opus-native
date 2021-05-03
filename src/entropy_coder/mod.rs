@@ -1,5 +1,6 @@
-pub(crate) use decoder::RangeDecoder;
-pub(crate) use encoder::RangeEncoder;
+//! Implements the entropy coder (a range decoder / encoder).
+pub(crate) use decoder::Decoder;
+pub(crate) use encoder::Encoder;
 
 mod decoder;
 mod encoder;
@@ -10,7 +11,7 @@ const BITRES: u32 = 3;
 /// Provides common functionality for the range encoder and decoder.
 pub(crate) trait Tell {
     /// Mut return the total number of whole bits read or written.
-    fn bits_total(&self) -> i32;
+    fn bits_total(&self) -> u32;
     /// Must return the number of values in the current range.
     fn range(&self) -> u32;
 
@@ -21,7 +22,7 @@ pub(crate) trait Tell {
     ///
     /// This will always be slightly larger than the exact value (e.g., all
     /// rounding error is in the positive direction).
-    fn tell(&self) -> i32 {
+    fn tell(&self) -> u32 {
         self.bits_total() - self.log(self.range())
     }
 
@@ -47,15 +48,14 @@ pub(crate) trait Tell {
         if r > correction[b as usize] {
             b += 1;
         }
-        l = (l << 3) + b as i32;
-        (bits - l) as u32
+        l = (l << 3) + b;
+        bits - l
     }
 
-    #[inline]
-    #[allow(clippy::as_conversions)]
-    fn log(&self, x: u32) -> i32 {
+    #[inline(always)]
+    fn log(&self, x: u32) -> u32 {
         // FIXME use u32::BITS once stabilized
-        (32 - x.leading_zeros()) as i32
+        32 - x.leading_zeros()
     }
 }
 
@@ -66,13 +66,13 @@ mod tests {
     use super::*;
 
     struct TellImpl {
-        bits_total: i32,
+        bits_total: u32,
         range: u32,
     }
 
     impl Tell for TellImpl {
         #[inline]
-        fn bits_total(&self) -> i32 {
+        fn bits_total(&self) -> u32 {
             self.bits_total
         }
 

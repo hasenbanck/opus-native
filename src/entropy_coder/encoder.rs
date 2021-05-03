@@ -2,7 +2,7 @@
 use crate::entropy_coder::Tell;
 
 /// The entropy encoder.
-pub(crate) struct RangeEncoder {
+pub(crate) struct Encoder {
     /// Buffered output.
     buf: Vec<u8>,
     /// The size of the buffer. // TODO can maybe be refactored
@@ -12,10 +12,10 @@ pub(crate) struct RangeEncoder {
     /// Bits that will be written at the end (Integer needs to be at least 32 bit).
     end_window: u32,
     /// Number of valid bits in end_window.
-    end_bits: i32,
+    end_bits: u32,
     /// The total number of whole bits written.
     /// This does not include partial bits currently in the range coder.
-    bits_total: i32,
+    bits_total: u32,
     /// The offset at which the next range coder byte will be written.
     offs: u32,
     /// The number of values in the current range.
@@ -25,16 +25,16 @@ pub(crate) struct RangeEncoder {
     /// The number of outstanding carry propagating symbols.
     ext: u32,
     /// A buffered output symbol, awaiting carry propagation.
-    rem: i32,
+    rem: u32,
 }
 
-impl Tell for RangeEncoder {
-    #[inline]
-    fn bits_total(&self) -> i32 {
+impl Tell for Encoder {
+    #[inline(always)]
+    fn bits_total(&self) -> u32 {
         self.bits_total
     }
 
-    #[inline]
+    #[inline(always)]
     fn range(&self) -> u32 {
         self.range
     }
