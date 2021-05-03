@@ -1,14 +1,41 @@
 //! Implements the entropy coder (a range decoder / encoder).
-pub(crate) use decoder::Decoder;
-pub(crate) use encoder::Encoder;
+#[cfg(feature = "decoder")]
+pub(crate) use decoder::EntropyDecoder;
+#[cfg(feature = "encoder")]
+pub(crate) use encoder::EntropyEncoder;
 
+#[cfg(feature = "decoder")]
 mod decoder;
+#[cfg(feature = "encoder")]
 mod encoder;
 
+/// The number of bits to use for the range-coded part of unsigned integers.
+// FIXME Use u8::BITS once stabilized
+const UINT_BITS: u32 = 8;
 /// The resolution of fractional-precision bit usage measurements, i.e., 3 => 1/8th bits.
 const BITRES: u32 = 3;
+/// Must be at least 32 bits, but if you have fast arithmetic on a larger type,
+/// you can speed up the decoder by using it here.
+// FIXME Use u32::BITS once stabilized
+const WINDOW_SIZE: u32 = 32;
+/// The number of bits to output at a time.
+// FIXME Use u32::BITS once stabilized
+const SYM_BITS: u32 = 8;
+/// The total number of bits in each of the state registers.
+// FIXME Use u32::BITS once stabilized
+const CODE_BITS: u32 = 32;
+/// The maximum symbol value.
+const SYM_MAX: u32 = (1 << SYM_BITS) - 1;
+/// Bits to shift by to move a symbol into the high-order position.
+const CODE_SHIFT: u32 = CODE_BITS - SYM_BITS - 1;
+/// Carry bit of the high-order range symbol.
+const CODE_TOP: u32 = 1 << (CODE_BITS - 1);
+/// Low-order bit of the high-order range symbol.
+const CODE_BOT: u32 = CODE_TOP >> SYM_BITS;
+/// The number of bits available for the last, partial symbol in the code field.
+const CODE_EXTRA: u32 = (CODE_BITS - 2) % SYM_BITS + 1;
 
-/// Provides common functionality for the range encoder and decoder.
+/// Provides common functionality for the entropy encoder and decoder.
 pub(crate) trait Tell {
     /// Mut return the total number of whole bits read or written.
     fn bits_total(&self) -> u32;
@@ -118,4 +145,6 @@ mod tests {
         assert_eq!(TellImpl { bits_total: 0x20, range: u32::MAX }.tell(), 0x0);
         assert_eq!(TellImpl { bits_total: u32::MAX, range: u32::MAX }.tell(), 0xFFFFFFDF);
     }
+
+    // TODO port the "unit test" of the C codebase.
 }

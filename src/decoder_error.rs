@@ -8,7 +8,7 @@ pub enum DecoderError {
     /// A `std::num::TryFromIntError`.
     TryFromIntError(std::num::TryFromIntError),
     /// An internal decoder error.
-    InternalError(String),
+    InternalError(&'static str),
 }
 
 impl std::fmt::Display for DecoderError {

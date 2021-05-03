@@ -11,6 +11,7 @@ keywords = ["opus", "audio", "codec", "decoder", "encoder"]
 edition = "2018"
 
 [features]
-default = ["decoder", "ogg"]
+default = ["decoder", "encoder", "ogg"]
 decoder = []
+encoder = []
 ogg = []

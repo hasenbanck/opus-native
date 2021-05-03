@@ -38,6 +38,8 @@ mod celt;
 mod decoder;
 #[cfg(feature = "decoder")]
 mod decoder_error;
+#[cfg(feature = "encoder")]
+mod encoder;
 mod entropy_coder;
 #[cfg(feature = "ogg")]
 mod ogg;

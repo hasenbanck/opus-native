@@ -33,10 +33,6 @@ impl Default for DecoderConfiguration {
     }
 }
 
-// TODO
-#[derive(Clone, Debug)]
-struct DecControl {}
-
 /// Opus decoder.
 ///
 /// Opus is a stateful codec with overlapping blocks and as a result Opus
