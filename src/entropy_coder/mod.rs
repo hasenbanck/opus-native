@@ -109,4 +109,13 @@ mod tests {
         assert_eq!(TellImpl { bits_total: 0x4CB, range: 0x1EDAD600 }.tell_frac(), 0x2569);
         assert_eq!(TellImpl { bits_total: 0x679, range: 0x11653800 }.tell_frac(), 0x32E0);
     }
+
+    #[test]
+    #[rustfmt::skip]
+    fn test_tell_frac_limits() {
+        assert_eq!(TellImpl { bits_total: 0x18, range: 0x800000 }.tell(), 0x0);
+        assert_eq!(TellImpl { bits_total: u32::MAX, range: 0x800000 }.tell(), 0xFFFFFFE7);
+        assert_eq!(TellImpl { bits_total: 0x20, range: u32::MAX }.tell(), 0x0);
+        assert_eq!(TellImpl { bits_total: u32::MAX, range: u32::MAX }.tell(), 0xFFFFFFDF);
+    }
 }

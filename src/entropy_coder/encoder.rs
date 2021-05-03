@@ -24,8 +24,8 @@ pub(crate) struct Encoder {
     val: u32,
     /// The number of outstanding carry propagating symbols.
     ext: u32,
-    /// A buffered output symbol, awaiting carry propagation.
-    rem: u32,
+    /// A buffered input symbol, awaiting carry propagation.
+    rem: u32, // TODO this might need to be a signed value?
 }
 
 impl Tell for Encoder {

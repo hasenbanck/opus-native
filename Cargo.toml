@@ -14,5 +14,3 @@ edition = "2018"
 default = ["decoder", "ogg"]
 decoder = []
 ogg = []
-
-[dependencies]
