@@ -154,11 +154,11 @@ impl<'d> EntropyDecoder<'d> {
 
     /// Calculates the cumulative frequency for the next symbol.
     ///
-    /// Returns the cumulative frequency representing the encoded symbol.
-    ///
     /// # Arguments
-    /// * ft - The total frequency of the symbols in the alphabet the
+    /// `ft` - The total frequency of the symbols in the alphabet the
     ///         next symbol was encoded with.
+    ///
+    /// Returns the cumulative frequency representing the encoded symbol.
     ///
     /// This can then be fed into the probability model to determine what that
     /// symbol is, and the additional frequency information required to advance to
@@ -191,12 +191,12 @@ impl<'d> EntropyDecoder<'d> {
     /// intermediate calculations are performed.
     ///
     /// # Arguments
-    /// * fl - The cumulative frequency of all symbols that come before the symbol
+    /// `fl` - The cumulative frequency of all symbols that come before the symbol
     ///        decoded.
-    /// * fh - The cumulative frequency of all symbols up to and including the symbol
+    /// `fh` - The cumulative frequency of all symbols up to and including the symbol
     ///        decoded. Together with fl, this defines the range [fl,fh) in which the
     ///        value returned above must fall.
-    /// * ft - The total frequency of the symbols in the alphabet the symbol decoded
+    /// `ft` - The total frequency of the symbols in the alphabet the symbol decoded
     ///        was encoded in. This must be the same as passed to the preceding call
     ///        to decode().
     ///
@@ -227,17 +227,17 @@ impl<'d> EntropyDecoder<'d> {
 
     /// Decodes a symbol given an "inverse" CDF table.
     ///
-    /// Returns the decoded symbol `s`.
     ///
     /// No call to update() is necessary after this call.
     ///
     /// # Arguments
-    /// * icdf - The "inverse" CDF, such that symbol `s` falls in the range
+    /// `icdf` - The "inverse" CDF, such that symbol `s` falls in the range
     ///          `[s>0?ft-icdf[s-1]:0..ft-icdf[s]]`, where `ft = 1 << ftb`.
     ///          The values must be monotonically non-increasing, and the last
     ///          value must be 0.
-    /// * ftb  - The number of bits of precision in the cumulative distribution.
+    /// `ftb`  - The number of bits of precision in the cumulative distribution.
     ///
+    /// Returns the decoded symbol `s`.
     #[allow(clippy::as_conversions)]
     pub(crate) fn icdf(&mut self, icdf: &[u8], ftb: u32) -> u32 {
         let mut s = self.range;
@@ -267,14 +267,13 @@ impl<'d> EntropyDecoder<'d> {
     ///
     /// The bits must have been encoded with uint().
     ///
-    /// Returns the decoded bits.
-    ///
     /// No call to update() is necessary after this call.
     ///
     /// # Arguments
-    /// * ft - The number of integers that can be decoded (one more than the max).
+    /// `ft` - The number of integers that can be decoded (one more than the max).
     ///        This must be at least 2, and no more than 2**32-1.
     ///
+    /// Returns the decoded bits.
     pub(crate) fn uint(&mut self, mut ft: u32) -> Result<u32, DecoderError> {
         debug_assert!(ft > 1);
         ft -= 1;
@@ -303,14 +302,13 @@ impl<'d> EntropyDecoder<'d> {
     ///
     /// The bits must have been encoded with bits().
     ///
-    /// Returns the decoded bits.
-    ///
     /// No call to update() is necessary after this call.
     ///
     /// # Arguments
-    /// * bits: The number of bits to extract. This must be
-    ///         between 0 and 25, inclusive.
+    /// `bits` - The number of bits to extract. This must be
+    ///          between 0 and 25, inclusive.
     ///
+    /// Returns the decoded bits.
     fn bits(&mut self, bits: u32) -> u32 {
         debug_assert!(bits <= 25);
         let mut window = self.end_window;
