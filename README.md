@@ -4,13 +4,13 @@
 [![Documentation](https://docs.rs/opus-native/badge.svg)](https://docs.rs/opus-native)
 ![BSD-3](https://img.shields.io/badge/license-BSD3-blue.svg)
 
-# Status
-
-This crate is under heavy development. Most functionality is not working.
-
 ## Overview
 
 Implements the free and open audio codec Opus in Rust.
+
+# Status
+
+This crate is under heavy development. Most functionality is not working.
 
 ## Credits
 
