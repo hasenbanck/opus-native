@@ -1,7 +1,6 @@
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
 #![deny(unused_results)]
-#![deny(clippy::as_conversions)]
 #![deny(clippy::panic)]
 #![deny(clippy::unwrap_used)]
 //! Implements the free and open audio codec Opus in Rust.
@@ -31,6 +30,10 @@ pub(crate) use celt::*;
 pub use decoder::*;
 #[cfg(feature = "decoder")]
 pub use decoder_error::*;
+#[cfg(feature = "encoder")]
+pub use encoder::*;
+#[cfg(feature = "encoder")]
+pub use encoder::*;
 pub(crate) use silk::*;
 
 mod celt;
@@ -40,9 +43,11 @@ mod decoder;
 mod decoder_error;
 #[cfg(feature = "encoder")]
 mod encoder;
-mod entropy_coder;
+#[cfg(feature = "encoder")]
+mod encoder_error;
 #[cfg(feature = "ogg")]
 mod ogg;
+mod range_coder;
 mod silk;
 
 /// Allows applications to use their own sample format.
@@ -60,7 +65,6 @@ impl Sample for f32 {
 }
 
 #[cfg(feature = "decoder")]
-#[allow(clippy::as_conversions)]
 impl Sample for i16 {
     fn from_f32(float: f32) -> Self {
         let float = float * 32768.0;
