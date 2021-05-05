@@ -89,6 +89,8 @@ mod tests {
 
     use std::f64::consts::LOG2_E;
 
+    use nanorand::RNG;
+
     use super::*;
 
     struct TellImpl {
@@ -172,13 +174,13 @@ mod tests {
 
                 enc.encode_bits(i, ftb).unwrap();
                 nbits2 = enc.tell();
-                if nbits2 - nbits != ftb {
-                    panic!(
-                        "Used {} bits to encode {} bits directly.",
-                        nbits2 - nbits,
-                        ftb
-                    );
-                }
+                assert_eq!(
+                    nbits2 - nbits,
+                    ftb,
+                    "Used {} bits to encode {} bits directly.",
+                    nbits2 - nbits,
+                    ftb
+                );
             }
         }
 
@@ -199,29 +201,33 @@ mod tests {
         for ft in 2..1024 {
             for i in 0..ft {
                 let sym = dec.decode_uint(ft);
-                if sym != i {
-                    panic!("Decoded {} instead of {} with ft of {}.", sym, i, ft);
-                }
+                assert_eq!(
+                    sym, i,
+                    "Decoded {} instead of {} with ft of {}.",
+                    sym, i, ft
+                );
             }
         }
 
         for ftb in 1..16 {
             for i in 0..(1 << ftb) {
                 let sym = dec.decode_bits(ftb);
-                if sym != i {
-                    panic!("Decoded {} instead of {} with ftb of {}.", sym, i, ftb);
-                }
+                assert_eq!(
+                    sym, i,
+                    "Decoded {} instead of {} with ftb of {}.",
+                    sym, i, ftb
+                );
             }
         }
 
         nbits2 = dec.tell_frac();
-        if nbits != nbits2 {
-            panic!(
-                "Reported number of bits used was {:.2}, should be {:.2}.",
-                ldexp(nbits2 as f64, -3.0),
-                ldexp(nbits as f64, -3.0)
-            );
-        }
+        assert_eq!(
+            nbits,
+            nbits2,
+            "Reported number of bits used was {:.2}, should be {:.2}.",
+            ldexp(nbits2 as f64, -3.0),
+            ldexp(nbits as f64, -3.0)
+        );
     }
 
     /// Testing an encoder bust prefers range coder data over raw bits.
@@ -257,5 +263,86 @@ mod tests {
         assert_eq!(dec.decode_uint(5), 1);
         assert_eq!(dec.decode_uint(6), 2);
         assert_eq!(dec.decode_uint(7), 6);
+    }
+
+    const DATA_SIZE: usize = 10000;
+
+    #[test]
+    fn test_encoder_random() {
+        let seed = 42;
+        let mut rnd = nanorand::WyRand::new_seed(seed);
+        let mut buffer = vec![0_u8; DATA_SIZE];
+
+        for _ in 0..1024 {
+            let ft = rnd.generate_range::<u32>(2, 1024);
+            let sz = rnd.generate_range::<usize>(128, 512);
+
+            let mut data = vec![0_u32; sz];
+            let mut tell = vec![0_u32; sz + 1];
+
+            let mut enc = RangeEncoder::new(&mut buffer);
+            let zeros = rnd.generate_range::<u32>(0, 14) == 0;
+            tell[0] = enc.tell_frac();
+            for j in 0..sz {
+                if zeros {
+                    data[j] = 0;
+                } else {
+                    data[j] = rnd.generate_range(0, ft);
+                }
+                enc.encode_uint(data[j], ft).unwrap();
+                tell[j + 1] = enc.tell_frac();
+            }
+            if rnd.generate_range::<u32>(0, 2) == 0 {
+                while enc.tell() % 8 != 0 {
+                    enc.encode_uint(rnd.generate_range::<u32>(0, 2), 2).unwrap();
+                }
+            }
+            let tell_bits = enc.tell();
+            enc.done().unwrap();
+
+            assert_eq!(
+                tell_bits,
+                enc.tell(),
+                "tell() changed after done(): {} instead of {}",
+                enc.tell(),
+                tell_bits,
+            );
+
+            assert!(
+                (tell_bits + 7) / 8 >= enc.range_bytes() as u32,
+                "tell() lied, there's {} bytes instead of {}",
+                enc.range_bytes(),
+                (tell_bits + 7) / 8,
+            );
+
+            drop(enc);
+            let mut dec = RangeDecoder::new(&buffer);
+
+            assert_eq!(
+                dec.tell_frac(),
+                tell[0],
+                "Tell mismatch between encoder and decoder at symbol {}: {} instead of {}.",
+                0,
+                dec.tell_frac(),
+                tell[0]
+            );
+
+            for j in 0..sz {
+                let sym = dec.decode_uint(ft);
+                assert_eq!(
+                    sym, data[j],
+                    "Decoded {} instead of {} with ft of {} at position {} of {}",
+                    sym, data[j], ft, j, sz
+                );
+                assert_eq!(
+                    dec.tell_frac(),
+                    tell[j + 1],
+                    "Tell mismatch between encoder and decoder at symbol {}: {} instead of {}",
+                    j + 1,
+                    dec.tell_frac(),
+                    tell[j + 1]
+                );
+            }
+        }
     }
 }

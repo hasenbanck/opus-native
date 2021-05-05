@@ -17,4 +17,4 @@ encoder = []
 ogg = []
 
 [dev-dependencies]
-nanorand = "0.5"
+nanorand = { version = "0.5", default-features = true, features = ["wyrand"] }
