@@ -93,6 +93,8 @@ mod tests {
 
     use super::*;
 
+    const DATA_SIZE: usize = 10000;
+
     struct TellImpl {
         bits_total: u32,
         range: u32,
@@ -152,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encoder_uint_bits() {
+    fn test_range_coder_uint_bits() {
         let mut entropy: f64 = 0.0;
         let mut nbits: u32;
         let mut nbits2: u32;
@@ -236,7 +238,7 @@ mod tests {
     /// get used in practice.
     /// It's mostly here for code coverage completeness.
     #[test]
-    fn test_encoder_prefer_range_coder_data() {
+    fn test_encoder_prefers_range_coder_data() {
         // Start with a 16-bit buffer.
         let mut buffer = vec![0_u8; 2];
         let mut enc = RangeEncoder::new(&mut buffer);
@@ -265,10 +267,8 @@ mod tests {
         assert_eq!(dec.decode_uint(7), 6);
     }
 
-    const DATA_SIZE: usize = 10000;
-
     #[test]
-    fn test_encoder_random() {
+    fn test_range_coder_random() {
         let seed = 42;
         let mut rnd = nanorand::WyRand::new_seed(seed);
         let mut buffer = vec![0_u8; DATA_SIZE];
@@ -333,6 +333,124 @@ mod tests {
                     sym, data[j],
                     "Decoded {} instead of {} with ft of {} at position {} of {}",
                     sym, data[j], ft, j, sz
+                );
+                assert_eq!(
+                    dec.tell_frac(),
+                    tell[j + 1],
+                    "Tell mismatch between encoder and decoder at symbol {}: {} instead of {}",
+                    j + 1,
+                    dec.tell_frac(),
+                    tell[j + 1]
+                );
+            }
+        }
+    }
+
+    /// Test compatibility between multiple different encode / decode routines.
+    #[test]
+    fn test_range_coder_compatibility() {
+        let seed = 42;
+        let mut rnd = nanorand::WyRand::new_seed(seed);
+        let mut buffer = vec![0_u8; DATA_SIZE];
+
+        for _ in 0..1024 {
+            let sz = rnd.generate_range::<usize>(128, 512);
+            let mut logp1 = vec![0_u32; sz];
+            let mut data = vec![0_u32; sz];
+            let mut tell = vec![0_u32; sz + 1];
+            let mut enc_method = vec![0_u32; sz];
+
+            let mut enc = RangeEncoder::new(&mut buffer);
+            tell[0] = enc.tell_frac();
+            for j in 0..sz {
+                data[j] = rnd.generate_range::<u32>(0, 2);
+                logp1[j] = rnd.generate_range::<u32>(1, 17);
+                enc_method[j] = rnd.generate_range::<u32>(0, 4);
+                match enc_method[j] {
+                    0 => {
+                        let x = if data[j] != 0 { (1 << logp1[j]) - 1 } else { 0 };
+                        let y = if data[j] != 0 { 0 } else { 1 };
+                        enc.encode(x, (1 << logp1[j]) - y, 1 << logp1[j]).unwrap();
+                    }
+                    1 => {
+                        let x = if data[j] != 0 { (1 << logp1[j]) - 1 } else { 0 };
+                        let y = if data[j] != 0 { 0 } else { 1 };
+                        enc.encode_bin(x, (1 << logp1[j]) - y, logp1[j]).unwrap();
+                    }
+                    2 => {
+                        enc.encode_bit_logp(data[j], logp1[j]).unwrap();
+                    }
+                    3 => {
+                        let icdf = [1, 0];
+                        enc.encode_icdf(data[j] as usize, &icdf, logp1[j]).unwrap();
+                    }
+                    _ => panic!("unreachable"),
+                }
+                tell[j + 1] = enc.tell_frac();
+            }
+            enc.done().unwrap();
+
+            assert!(
+                (enc.tell() + 7) / 8 >= enc.range_bytes() as u32,
+                "tell() lied, there's {} bytes instead of {}",
+                enc.range_bytes(),
+                (enc.tell() + 7) / 8,
+            );
+
+            drop(enc);
+            let mut dec = RangeDecoder::new(&buffer);
+
+            assert_eq!(
+                dec.tell_frac(),
+                tell[0],
+                "Tell mismatch between encoder and decoder at symbol {}: {} instead of {}",
+                0,
+                dec.tell_frac(),
+                tell[0]
+            );
+
+            for j in 0..sz {
+                let dec_method = rnd.generate_range::<u32>(0, 4);
+                let mut sym: u32 = 0;
+                match dec_method {
+                    0 => {
+                        let fs = dec.decode(1 << logp1[j]);
+                        let s = fs >= (1 << logp1[j]) - 1;
+                        let x = if s { (1 << logp1[j]) - 1 } else { 0 };
+                        let y = if s { 0 } else { 1 };
+                        sym = if s { 1 } else { 0 };
+
+                        dec.update(x, (1 << logp1[j]) - y, 1 << logp1[j]);
+                    }
+                    1 => {
+                        let fs = dec.decode_bin(logp1[j]);
+                        let s = fs >= (1 << logp1[j]) - 1;
+                        let x = if s { (1 << logp1[j]) - 1 } else { 0 };
+                        let y = if s { 0 } else { 1 };
+                        sym = if s { 1 } else { 0 };
+
+                        dec.update(x, (1 << logp1[j]) - y, 1 << logp1[j]);
+                    }
+                    2 => {
+                        sym = if dec.decode_bit_logp(logp1[j]) { 1 } else { 0 };
+                    }
+                    3 => {
+                        let icdf = [1, 0];
+                        sym = dec.decode_icdf(&icdf, logp1[j]);
+                    }
+                    _ => panic!("unreachable"),
+                }
+                assert_eq!(
+                    sym,
+                    data[j],
+                    "Decoded {} instead of {} with logp1 of {} at position {} of {}. Encoding method: {}, decoding method: {}",
+                    sym,
+                    data[j],
+                    logp1[j],
+                    j,
+                    sz,
+                    enc_method[j],
+                    dec_method
                 );
                 assert_eq!(
                     dec.tell_frac(),
