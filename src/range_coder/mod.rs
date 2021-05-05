@@ -154,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn test_range_coder_uint_bits() {
+    fn test_simple_uint_bits() {
         let mut entropy: f64 = 0.0;
         let mut nbits: u32;
         let mut nbits2: u32;
@@ -268,7 +268,7 @@ mod tests {
     }
 
     #[test]
-    fn test_range_coder_random() {
+    fn test_random_data() {
         let seed = 42;
         let mut rnd = nanorand::WyRand::new_seed(seed);
         let mut buffer = vec![0_u8; DATA_SIZE];
@@ -348,7 +348,7 @@ mod tests {
 
     /// Test compatibility between multiple different encode / decode routines.
     #[test]
-    fn test_range_coder_compatibility() {
+    fn test_compatibility() {
         let seed = 42;
         let mut rnd = nanorand::WyRand::new_seed(seed);
         let mut buffer = vec![0_u8; DATA_SIZE];
@@ -411,7 +411,7 @@ mod tests {
 
             for j in 0..sz {
                 let dec_method = rnd.generate_range::<u32>(0, 4);
-                let mut sym: u32 = 0;
+                let sym: u32;
                 match dec_method {
                     0 => {
                         let fs = dec.decode(1 << logp1[j]);
@@ -462,5 +462,38 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_patch_initial_bits() {
+        let mut buffer = vec![0_u8; DATA_SIZE];
+        let mut enc = RangeEncoder::new(&mut buffer);
+        enc.encode_bit_logp(0, 1).unwrap();
+        enc.encode_bit_logp(0, 1).unwrap();
+        enc.encode_bit_logp(1, 6).unwrap();
+        enc.encode_bit_logp(0, 2).unwrap();
+        enc.patch_initial_bits(0, 2).unwrap();
+        enc.done().unwrap();
+
+        assert_eq!(enc.range_bytes(), 2);
+        drop(enc);
+
+        assert_eq!(
+            buffer[0], 63,
+            "Got {} when expecting 63 for patch_initial_bits()",
+            buffer[0]
+        );
+    }
+
+    #[test]
+    fn test_shrink() {
+        let mut buffer = vec![0_u8; DATA_SIZE];
+        let mut enc = RangeEncoder::new(&mut buffer);
+        enc.encode_uint(1, 255).unwrap();
+        enc.encode_uint(2, 255).unwrap();
+        enc.encode_uint(3, 255).unwrap();
+        enc.encode_uint(4, 255).unwrap();
+        enc.done().unwrap();
+        enc.shrink(5);
     }
 }
