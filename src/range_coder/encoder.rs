@@ -11,6 +11,7 @@ use crate::range_coder::{
 /// [RFC6716](https://tools.ietf.org/html/rfc6716)
 pub(crate) struct RangeEncoder<'e> {
     /// Buffered output.
+    // TODO refactor me to an &mut [] and store the "storage/size" again.
     buffer: &'e mut Vec<u8>,
     /// The offset at which the last byte containing raw bits was written.
     end_offs: usize,
@@ -24,12 +25,13 @@ pub(crate) struct RangeEncoder<'e> {
     /// The offset at which the next range coder byte will be written.
     offs: usize,
     /// The number of values in the current range.
-    range: u32,
+    rng: u32,
     /// The low end of the current range.
     val: u32,
     /// The number of outstanding carry propagating symbols.
     ext: u32,
     /// A buffered output symbol, awaiting carry propagation.
+    // TODO could be changed to an u8
     rem: Option<u32>,
 }
 
@@ -41,7 +43,7 @@ impl<'e> Tell for RangeEncoder<'e> {
 
     #[inline(always)]
     fn range(&self) -> u32 {
-        self.range
+        self.rng
     }
 }
 
@@ -61,7 +63,7 @@ impl<'e> RangeEncoder<'e> {
             end_bits: 0,
             bits_total,
             offs: 0,
-            range,
+            rng: range,
             val: 0,
             ext: 0,
             rem: None,
@@ -77,7 +79,7 @@ impl<'e> RangeEncoder<'e> {
         self.end_bits = 0;
         self.bits_total = CODE_BITS + 1;
         self.offs = 0;
-        self.range = CODE_TOP;
+        self.rng = CODE_TOP;
         self.val = 0;
         self.ext = 0;
         self.rem = None;
@@ -95,6 +97,7 @@ impl<'e> RangeEncoder<'e> {
         }
         self.buffer[self.offs] = value;
         self.offs += 1;
+
         Ok(())
     }
 
@@ -138,8 +141,9 @@ impl<'e> RangeEncoder<'e> {
                 let sym = ((SYM_MAX + carry) & SYM_MAX) as u8;
                 loop {
                     self.write_byte(sym)?;
+
                     self.ext -= 1;
-                    if !self.ext > 0 {
+                    if self.ext == 0 {
                         break;
                     }
                 }
@@ -156,11 +160,11 @@ impl<'e> RangeEncoder<'e> {
     /// in the high-order symbol.
     fn normalize(&mut self) -> Result<(), EncoderError> {
         // If the range is too small, output some bits and rescale it.
-        while self.range <= CODE_BOT {
+        while self.rng <= CODE_BOT {
             self.carry_out(self.val >> CODE_SHIFT)?;
             // Move the next-to-high-order symbol into the high-order position.
             self.val = (self.val << SYM_BITS) & (CODE_TOP - 1);
-            self.range <<= SYM_BITS;
+            self.rng <<= SYM_BITS;
             self.bits_total += SYM_BITS;
         }
 
@@ -177,20 +181,20 @@ impl<'e> RangeEncoder<'e> {
     /// previously encoded information that it is supposed to do so as well.
     ///
     /// # Argument  
-    /// `fl` - The cumulative frequency of all symbols that come before the one to be
-    ///        encoded.
-    /// `fh` - The cumulative frequency of all symbols up to and including the one to
-    ///        be encoded. Together with _fl, this defines the range [_fl,_fh) in
-    ///        which the decoded value will fall.
-    /// `ft` - The sum of the frequencies of all the symbols.
+    /// * `fl` - The cumulative frequency of all symbols that come before the one to be
+    ///          encoded.
+    /// * `fh` - The cumulative frequency of all symbols up to and including the one to
+    ///          be encoded. Together with _fl, this defines the range [_fl,_fh) in
+    ///          which the decoded value will fall.
+    /// * `ft` - The sum of the frequencies of all the symbols.
     ///
     pub(crate) fn encode(&mut self, fl: u32, fh: u32, ft: u32) -> Result<(), EncoderError> {
-        let r = self.range / ft;
+        let r = self.rng / ft;
         if fl > 0 {
-            self.val += self.range - (r * (ft - fl));
-            self.range = r * (fh - fl);
+            self.val += self.rng - (r * (ft - fl));
+            self.rng = r * (fh - fl);
         } else {
-            self.range -= r * (ft - fh);
+            self.rng -= r * (ft - fh);
         };
         self.normalize()?;
 
@@ -199,12 +203,12 @@ impl<'e> RangeEncoder<'e> {
 
     /// Equivalent to encode() with `ft == 1 << bits`.
     pub(crate) fn encode_bin(&mut self, fl: u32, fh: u32, bits: u32) -> Result<(), EncoderError> {
-        let r = self.range >> bits;
+        let r = self.rng >> bits;
         if fl > 0 {
-            self.val += self.range - (r * ((1 << bits) - fl));
-            self.range = r * (fh - fl);
+            self.val += self.rng - (r * ((1 << bits) - fl));
+            self.rng = r * (fh - fl);
         } else {
-            self.range -= r * ((1 << bits) - fh);
+            self.rng -= r * ((1 << bits) - fh);
         }
         self.normalize()?;
 
@@ -213,14 +217,14 @@ impl<'e> RangeEncoder<'e> {
 
     /// Encode a bit that has a `1/(1<<logp)` probability of being a one.
     pub(crate) fn encode_bit_logp(&mut self, val: u32, logp: u32) -> Result<(), EncoderError> {
-        let mut r = self.range;
+        let mut r = self.rng;
         let l = self.val;
         let s = r >> logp;
         r -= s;
         if val != 0 {
             self.val = l + r
         };
-        self.range = if val != 0 { s } else { r };
+        self.rng = if val != 0 { s } else { r };
         self.normalize()?;
 
         Ok(())
@@ -229,12 +233,12 @@ impl<'e> RangeEncoder<'e> {
     /// Encodes a symbol given an "inverse" CDF table.
     ///
     /// # Arguments
-    /// `s`    - The index of the symbol to encode.
-    /// `icdf` - The "inverse" CDF, such that symbol _s falls in the range
-    ///          `[s>0?ft-icdf[s-1]:0..ft-icdf[s]]`, where `ft = 1 << ftb`.
-    ///          The values must be monotonically non-increasing, and the last value
-    ///          must be 0.
-    /// `ftb`  - The number of bits of precision in the cumulative distribution.
+    /// * `s`    - The index of the symbol to encode.
+    /// * `icdf` - The "inverse" CDF, such that symbol _s falls in the range
+    ///            `[s>0?ft-icdf[s-1]:0..ft-icdf[s]]`, where `ft = 1 << ftb`.
+    ///            The values must be monotonically non-increasing, and the last value
+    ///            must be 0.
+    /// * `ftb`  - The number of bits of precision in the cumulative distribution.
     ///
     pub(crate) fn encode_icdf(
         &mut self,
@@ -242,12 +246,12 @@ impl<'e> RangeEncoder<'e> {
         icdf: &[u8],
         ftb: u32,
     ) -> Result<(), EncoderError> {
-        let r = self.range >> ftb;
+        let r = self.rng >> ftb;
         if s > 0 {
-            self.val += self.range - (r * u32::from(icdf[s - 1]));
-            self.range = r * u32::from(icdf[s - 1] - icdf[s]);
+            self.val += self.rng - (r * u32::from(icdf[s - 1]));
+            self.rng = r * u32::from(icdf[s - 1] - icdf[s]);
         } else {
-            self.range -= r * u32::from(icdf[s])
+            self.rng -= r * u32::from(icdf[s])
         };
         self.normalize()?;
 
@@ -257,19 +261,19 @@ impl<'e> RangeEncoder<'e> {
     /// Encodes a raw unsigned integer in the stream.
     ///
     /// # Arguments
-    /// `fl` - The integer to encode.
-    /// `ft` - The number of integers that can be encoded (one more than the max).
-    ///        This must be at least 2, and no more than 2**32-1.
-    pub(crate) fn encode_uint(&mut self, mut fl: u32, mut ft: u32) -> Result<(), EncoderError> {
-        // In order to optimize self.log(), it is undefined for the value 0.
+    /// * `fl` - The integer to encode.
+    /// * `ft` - The number of integers that can be encoded (one more than the max).
+    ///          This must be at least 2, and no more than 2**32-1.
+    pub(crate) fn encode_uint(&mut self, fl: u32, mut ft: u32) -> Result<(), EncoderError> {
+        // In order to optimize log(), it is undefined for the value 0.
         debug_assert!(ft > 1);
         ft -= 1;
         let mut ftb = self.log(ft);
         if ftb > UINT_BITS {
             ftb -= UINT_BITS;
-            ft = (ft >> ftb) + 1;
-            fl >>= ftb;
-            self.encode(fl, fl + 1, ft)?;
+            let ft1 = (ft >> ftb) + 1;
+            let fl1 = fl >> ftb;
+            self.encode(fl1, fl1 + 1, ft1)?;
             self.encode_bits(fl & ((1 << ftb) - 1), ftb)?;
         } else {
             self.encode(fl, fl + 1, ft + 1)?;
@@ -281,9 +285,9 @@ impl<'e> RangeEncoder<'e> {
     /// Encodes a sequence of raw bits in the stream.
     ///
     /// # Arguments
-    /// `fl`   - The bits to encode.
-    /// `bits` - The number of bits to encode.
-    ///          This must be between 1 and 25, inclusive.
+    /// * `fl`   - The bits to encode.
+    /// * `bits` - The number of bits to encode.
+    ///            This must be between 1 and 25, inclusive.
     pub(crate) fn encode_bits(&mut self, fl: u32, bits: u32) -> Result<(), EncoderError> {
         debug_assert!(bits > 0);
         let mut window = self.end_window;
@@ -324,10 +328,10 @@ impl<'e> RangeEncoder<'e> {
     /// check this latter condition.
     ///
     /// # Arguments
-    /// `val`   - The bits to encode (in the least _nbits significant bits).
-    ///           They will be decoded in order from most-significant to least.
-    /// `nbits` - The number of bits to overwrite.
-    ///           This must be no more than 8.
+    /// * `val`   - The bits to encode (in the least _nbits significant bits).
+    ///            They will be decoded in order from most-significant to least.
+    /// * `nbits` - The number of bits to overwrite.
+    ///            This must be no more than 8.
     ///
     pub(crate) fn patch_initial_bits(&mut self, val: u32, nbits: u32) -> Result<(), EncoderError> {
         debug_assert!(nbits <= SYM_BITS);
@@ -339,7 +343,7 @@ impl<'e> RangeEncoder<'e> {
         } else if let Some(rem) = self.rem {
             // The first byte is still awaiting carry propagation.
             self.rem = Some((rem & !mask) | val << shift);
-        } else if self.range <= (CODE_TOP >> nbits) {
+        } else if self.rng <= (CODE_TOP >> nbits) {
             // The renormalization loop has never been run.
             self.val = (self.val & !(mask << CODE_SHIFT)) | val << (CODE_SHIFT + shift);
         } else {
@@ -360,9 +364,9 @@ impl<'e> RangeEncoder<'e> {
     /// will fit in the new size.
     ///
     /// # Arguments
-    /// `len` - The number of bytes in the new buffer.
-    ///         This must be large enough to contain the bits already written, and
-    ///         must be no larger than the existing size.
+    /// * `len` - The number of bytes in the new buffer.
+    ///           This must be large enough to contain the bits already written, and
+    ///           must be no larger than the existing size.
     pub(crate) fn shrink(&mut self, len: usize) {
         debug_assert!(self.offs + self.end_offs <= len);
         let start = self.buffer.len() - self.end_offs;
@@ -381,10 +385,10 @@ impl<'e> RangeEncoder<'e> {
     pub(crate) fn done(&mut self) -> Result<(), EncoderError> {
         // We output the minimum number of bits that ensures that the symbols encoded
         // thus far will be decoded correctly regardless of the bits that follow.
-        let mut l: i32 = (CODE_BITS - self.log(self.range)) as i32;
+        let mut l: i32 = (CODE_BITS - self.log(self.rng)) as i32;
         let mut msk = (CODE_TOP - 1) >> l;
         let mut end = (self.val + msk) & !msk;
-        if (end | msk) >= self.val + self.range {
+        if (end | msk) >= self.val + self.rng {
             l += 1;
             msk >>= 1;
             end = (self.val + msk) & !msk;

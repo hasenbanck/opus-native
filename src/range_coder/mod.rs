@@ -150,7 +150,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encoding_raw_bit_values() {
+    fn test_encoding_uint_bits() {
         let mut entropy: f64 = 0.0;
         let mut nbits: u32;
         let mut nbits2: u32;
@@ -169,6 +169,7 @@ mod tests {
             for i in 0..(1 << ftb) {
                 entropy += ftb as f64;
                 nbits = enc.tell();
+
                 enc.encode_bits(i, ftb).unwrap();
                 nbits2 = enc.tell();
                 if nbits2 - nbits != ftb {
@@ -193,12 +194,11 @@ mod tests {
         println!("Packed to {} bytes.", enc.range_bytes());
 
         drop(enc);
-
         let mut dec = RangeDecoder::new(&buffer);
 
         for ft in 2..1024 {
             for i in 0..ft {
-                let sym = dec.decode_uint(ft).unwrap();
+                let sym = dec.decode_uint(ft);
                 if sym != i {
                     panic!("Decoded {} instead of {} with ft of {}.", sym, i, ft);
                 }

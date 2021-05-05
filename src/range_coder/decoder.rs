@@ -58,13 +58,13 @@ pub(crate) struct RangeDecoder<'d> {
     /// The offset at which the next range coder byte will be read.
     offs: usize,
     /// The number of values in the current range.
-    range: u32,
+    rng: u32,
     /// The difference between the top of the current range and the input value, minus one.
     val: u32,
     /// The saved normalization factor from decode().
     ext: u32,
     /// A buffered input symbol, awaiting carry propagation.
-    remainder: u8,
+    rem: u8,
 }
 
 impl<'d> Tell for RangeDecoder<'d> {
@@ -75,11 +75,10 @@ impl<'d> Tell for RangeDecoder<'d> {
 
     #[inline(always)]
     fn range(&self) -> u32 {
-        self.range
+        self.rng
     }
 }
 
-/// TODO if the tests should be negative, we might need to adjust the usage of signed types or wrappings.
 impl<'d> RangeDecoder<'d> {
     /// Creates a new decoder from the given buffer.
     pub(crate) fn new(buffer: &'d [u8]) -> Self {
@@ -87,28 +86,28 @@ impl<'d> RangeDecoder<'d> {
         // The final value after the normalize() call will be the same as in
         // the encoder, but we have to compensate for the bits that are added there.
         let bits_total = CODE_BITS + 1 - ((CODE_BITS - CODE_EXTRA) / SYM_BITS) * SYM_BITS;
-        let range = 1 << CODE_EXTRA;
+        let rng = 1 << CODE_EXTRA;
 
-        let mut decoder = Self {
+        let mut dec = Self {
             buffer,
             end_offs: 0,
             end_window: 0,
             end_bits: 0,
             bits_total,
             offs: 0,
-            range,
+            rng,
             val: 0,
             ext: 0,
-            remainder: 0,
+            rem: 0,
         };
 
-        decoder.remainder = decoder.read_byte();
-        decoder.val = range - 1 - (u32::from(decoder.remainder) >> (SYM_BITS - CODE_EXTRA));
+        dec.rem = dec.read_byte();
+        dec.val = rng - 1 - (u32::from(dec.rem) >> (SYM_BITS - CODE_EXTRA));
 
         // Normalize the interval.
-        decoder.normalize();
+        dec.normalize();
 
-        decoder
+        dec
     }
 
     /// Reads the next byte from the start of the buffer.
@@ -137,15 +136,15 @@ impl<'d> RangeDecoder<'d> {
     /// in the high-order symbol.
     fn normalize(&mut self) {
         // If the range is too small, rescale it and input some bits.
-        while self.range <= CODE_BOT {
+        while self.rng <= CODE_BOT {
             self.bits_total += SYM_BITS;
-            self.range <<= SYM_BITS;
+            self.rng <<= SYM_BITS;
             // Use up the remaining bits from our last symbol.
-            let mut symbol = u32::from(self.remainder);
+            let mut symbol = u32::from(self.rem);
             // Read the next value from the input.
-            self.remainder = self.read_byte();
+            self.rem = self.read_byte();
             // Take the rest of the bits we need from this new symbol.
-            symbol = (symbol << SYM_BITS | u32::from(self.remainder)) >> (SYM_BITS - CODE_EXTRA);
+            symbol = (symbol << SYM_BITS | u32::from(self.rem)) >> (SYM_BITS - CODE_EXTRA);
             // And subtract them from val, capped to be less than CODE_TOP.
             self.val = ((self.val << SYM_BITS) + (SYM_MAX & !symbol)) & (CODE_TOP - 1);
         }
@@ -154,8 +153,8 @@ impl<'d> RangeDecoder<'d> {
     /// Calculates the cumulative frequency for the next symbol.
     ///
     /// # Arguments
-    /// `ft` - The total frequency of the symbols in the alphabet the
-    ///         next symbol was encoded with.
+    /// * `ft` - The total frequency of the symbols in the alphabet the
+    ///          next symbol was encoded with.
     ///
     /// Returns the cumulative frequency representing the encoded symbol.
     ///
@@ -171,14 +170,14 @@ impl<'d> RangeDecoder<'d> {
     /// up to and including the one encoded is fh, then the returned value
     /// will fall in the range [fl..fh].
     pub(crate) fn decode(&mut self, ft: u32) -> u32 {
-        self.ext = self.range / ft;
+        self.ext = self.rng / ft;
         let s = self.val / self.ext;
         ft - u32::min(s + 1, ft)
     }
 
     /// Equivalent to decode() with ft == 1 << bits.
     pub(crate) fn decode_bin(&mut self, bits: u32) -> u32 {
-        self.ext = self.range >> bits;
+        self.ext = self.rng >> bits;
         let s = self.val / self.ext;
         (1 << bits) - u32::min(s + 1, 1 << bits)
     }
@@ -190,36 +189,36 @@ impl<'d> RangeDecoder<'d> {
     /// intermediate calculations are performed.
     ///
     /// # Arguments
-    /// `fl` - The cumulative frequency of all symbols that come before the symbol
-    ///        decoded.
-    /// `fh` - The cumulative frequency of all symbols up to and including the symbol
-    ///        decoded. Together with fl, this defines the range [fl,fh) in which the
-    ///        value returned above must fall.
-    /// `ft` - The total frequency of the symbols in the alphabet the symbol decoded
-    ///        was encoded in. This must be the same as passed to the preceding call
-    ///        to decode().
+    /// * `fl` - The cumulative frequency of all symbols that come before the symbol
+    ///          decoded.
+    /// * `fh` - The cumulative frequency of all symbols up to and including the symbol
+    ///          decoded. Together with fl, this defines the range [fl,fh) in which the
+    ///          value returned above must fall.
+    /// * `ft` - The total frequency of the symbols in the alphabet the symbol decoded
+    ///          was encoded in. This must be the same as passed to the preceding call
+    ///          to decode().
     ///
     pub(crate) fn update(&mut self, fl: u32, fh: u32, ft: u32) {
         let s = self.ext * (ft - fh);
         self.val -= s;
-        self.range = if fl > 0 {
+        self.rng = if fl > 0 {
             self.ext * (fh - fl)
         } else {
-            self.range - s
+            self.rng - s
         };
         self.normalize();
     }
 
     /// Decode a bit that has a `1/(1<<logp)` probability of being a one.
     pub(crate) fn decode_bit_logp(&mut self, logp: u32) -> bool {
-        let r = self.range;
+        let r = self.rng;
         let d = self.val;
         let s = r >> logp;
         let ret = d < s;
         if !ret {
             self.val = d - s
         };
-        self.range = if ret { s } else { r - s };
+        self.rng = if ret { s } else { r - s };
         self.normalize();
         ret
     }
@@ -230,15 +229,15 @@ impl<'d> RangeDecoder<'d> {
     /// No call to update() is necessary after this call.
     ///
     /// # Arguments
-    /// `icdf` - The "inverse" CDF, such that symbol `s` falls in the range
-    ///          `[s>0?ft-icdf[s-1]:0..ft-icdf[s]]`, where `ft = 1 << ftb`.
-    ///          The values must be monotonically non-increasing, and the last
-    ///          value must be 0.
-    /// `ftb`  - The number of bits of precision in the cumulative distribution.
+    /// * `icdf` - The "inverse" CDF, such that symbol `s` falls in the range
+    ///            `[s>0?ft-icdf[s-1]:0..ft-icdf[s]]`, where `ft = 1 << ftb`.
+    ///            The values must be monotonically non-increasing, and the last
+    ///            value must be 0.
+    /// * `ftb`  - The number of bits of precision in the cumulative distribution.
     ///
     /// Returns the decoded symbol `s`.
     pub(crate) fn decode_icdf(&mut self, icdf: &[u8], ftb: u32) -> u32 {
-        let mut s = self.range;
+        let mut s = self.rng;
         let d = self.val;
         let r = s >> ftb;
 
@@ -255,7 +254,7 @@ impl<'d> RangeDecoder<'d> {
         }
 
         self.val = d - s;
-        self.range = t - s;
+        self.rng = t - s;
         self.normalize();
 
         ret
@@ -268,31 +267,30 @@ impl<'d> RangeDecoder<'d> {
     /// No call to update() is necessary after this call.
     ///
     /// # Arguments
-    /// `ft` - The number of integers that can be decoded (one more than the max).
-    ///        This must be at least 2, and no more than 2**32-1.
+    /// * `ft` - The number of integers that can be decoded (one more than the max).
+    ///          This must be at least 2, and no more than 2**32-1.
     ///
     /// Returns the decoded bits.
-    pub(crate) fn decode_uint(&mut self, mut ft: u32) -> Result<u32, DecoderError> {
+    pub(crate) fn decode_uint(&mut self, mut ft: u32) -> u32 {
         debug_assert!(ft > 1);
         ft -= 1;
         let mut ftb = self.log(ft);
         if ftb > UINT_BITS {
             ftb -= UINT_BITS;
-            ft = (ft >> ftb) + 1;
-            let s = self.decode(ft);
-            self.update(s, s + 1, ft);
+            let ft1 = (ft >> ftb) + 1;
+            let s = self.decode(ft1);
+            self.update(s, s + 1, ft1);
             let t = s << ftb | self.decode_bits(ftb);
             if t <= ft {
-                return Ok(t);
+                return t;
             };
-
-            // The C original doesn't specify what this error actually means.
-            Err(DecoderError::InternalError("range decoder: uint: t>ft"))
+            // The frame is corrupt. The specification allows to saturate to (ft-1) in this case.
+            ft
         } else {
             ft += 1;
             let s = self.decode(ft);
             self.update(s, s + 1, ft);
-            Ok(s)
+            s
         }
     }
 
@@ -303,14 +301,15 @@ impl<'d> RangeDecoder<'d> {
     /// No call to update() is necessary after this call.
     ///
     /// # Arguments
-    /// `bits` - The number of bits to extract. This must be
-    ///          between 0 and 25, inclusive.
+    /// * `bits`   - The number of bits to extract. This must be
+    ///              between 0 and 25, inclusive.
     ///
     /// Returns the decoded bits.
     pub(crate) fn decode_bits(&mut self, bits: u32) -> u32 {
         debug_assert!(bits <= 25);
         let mut window = self.end_window;
         let mut available = self.end_bits;
+
         if available < bits {
             loop {
                 window |= u32::from(self.read_byte_from_end()) << available;
@@ -321,9 +320,11 @@ impl<'d> RangeDecoder<'d> {
                 }
             }
         }
+
         let ret = window & ((1 << bits) - 1);
         window >>= bits;
         available -= bits;
+
         self.end_window = window;
         self.end_bits = available;
         self.bits_total += bits;
