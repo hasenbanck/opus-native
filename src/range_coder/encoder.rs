@@ -11,8 +11,9 @@ use crate::range_coder::{
 /// [RFC6716](https://tools.ietf.org/html/rfc6716)
 pub(crate) struct RangeEncoder<'e> {
     /// Buffered output.
-    // TODO refactor me to an &mut [] and store the "storage/size" again.
-    buffer: &'e mut Vec<u8>,
+    buffer: &'e mut [u8],
+    /// The size of the currently used region of the buffer.
+    storage: usize,
     /// The offset at which the last byte containing raw bits was written.
     end_offs: usize,
     /// Bits that will be written at the end.
@@ -31,7 +32,6 @@ pub(crate) struct RangeEncoder<'e> {
     /// The number of outstanding carry propagating symbols.
     ext: u32,
     /// A buffered output symbol, awaiting carry propagation.
-    // TODO could be changed to an u8
     rem: Option<u32>,
 }
 
@@ -49,15 +49,15 @@ impl<'e> Tell for RangeEncoder<'e> {
 
 impl<'e> RangeEncoder<'e> {
     /// Creates a new encoder from the given buffer.
-    pub(crate) fn new(buffer: &'e mut Vec<u8>) -> Self {
+    pub(crate) fn new(buffer: &'e mut [u8]) -> Self {
         // This is the offset from which tell() will subtract partial bits.
         let bits_total = CODE_BITS + 1;
         let range = CODE_TOP;
-
-        buffer.resize(buffer.capacity(), 0x0);
+        let storage = buffer.len();
 
         Self {
             buffer,
+            storage,
             end_offs: 0,
             end_window: 0,
             end_bits: 0,
@@ -72,8 +72,7 @@ impl<'e> RangeEncoder<'e> {
 
     /// Resets the state of the encoder.
     pub(crate) fn reset(&mut self) {
-        self.buffer.resize(self.buffer.capacity(), 0x0);
-
+        self.storage = self.buffer.len();
         self.end_offs = 0;
         self.end_window = 0;
         self.end_bits = 0;
@@ -92,7 +91,7 @@ impl<'e> RangeEncoder<'e> {
 
     /// Writes a byte from front to back.
     fn write_byte(&mut self, value: u8) -> Result<(), EncoderError> {
-        if self.offs + self.end_offs >= self.buffer.len() {
+        if self.offs + self.end_offs >= self.storage {
             return Err(EncoderError::BufferToSmall);
         }
         self.buffer[self.offs] = value;
@@ -103,12 +102,11 @@ impl<'e> RangeEncoder<'e> {
 
     /// Writes a byte from back to front.
     fn write_byte_at_end(&mut self, value: u8) -> Result<(), EncoderError> {
-        let size = self.buffer.len();
-        if self.offs + self.end_offs >= size {
+        if self.offs + self.end_offs >= self.storage {
             return Err(EncoderError::BufferToSmall);
         }
         self.end_offs += 1;
-        self.buffer[size - self.end_offs] = value;
+        self.buffer[self.storage - self.end_offs] = value;
         Ok(())
     }
 
@@ -369,12 +367,12 @@ impl<'e> RangeEncoder<'e> {
     ///           must be no larger than the existing size.
     pub(crate) fn shrink(&mut self, len: usize) {
         debug_assert!(self.offs + self.end_offs <= len);
-        let start = self.buffer.len() - self.end_offs;
-        let end = self.buffer.len();
+        let start = self.storage - self.end_offs;
+        let end = self.storage;
         let dest = len - self.end_offs;
 
         self.buffer.copy_within(start..end, dest);
-        self.buffer.truncate(len);
+        self.storage = len;
     }
 
     /// Indicates that there are no more symbols to encode.
@@ -411,24 +409,23 @@ impl<'e> RangeEncoder<'e> {
             used -= SYM_BITS;
         }
         // Clear any excess space and add any remaining extra bits to the last byte.
-        let size = self.buffer.len();
-        self.buffer[self.offs..size - self.end_offs]
+        self.buffer[self.offs..self.storage - self.end_offs]
             .iter_mut()
             .for_each(|x| *x = 0);
 
         if used > 0 {
             // If there's no range coder data at all, give up.
-            if self.end_offs >= self.buffer.len() {
+            if self.end_offs >= self.storage {
                 return Err(EncoderError::InternalError("no range coder data"));
             } else {
                 // TODO can we simplify this? (not using sign)
                 let l = -l;
-                if self.offs + self.end_offs >= self.buffer.len() && l < used as i32 {
+                if self.offs + self.end_offs >= self.storage && l < used as i32 {
                     return Err(EncoderError::InternalError(
-                        "offset + end_offset >= buffer.len()",
+                        "offset + end_offset >= storage",
                     ));
                 }
-                self.buffer[size - self.end_offs - 1] |= window as u8;
+                self.buffer[self.storage - self.end_offs - 1] |= window as u8;
             }
         }
 
