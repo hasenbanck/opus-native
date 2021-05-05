@@ -150,7 +150,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encoding_uint_bits() {
+    fn test_encoder_uint_bits() {
         let mut entropy: f64 = 0.0;
         let mut nbits: u32;
         let mut nbits2: u32;
@@ -222,5 +222,40 @@ mod tests {
                 ldexp(nbits as f64, -3.0)
             );
         }
+    }
+
+    /// Testing an encoder bust prefers range coder data over raw bits.
+    /// This isn't a general guarantee, will only work for data that is buffered in
+    /// the encoder state and not yet stored in the user buffer, and should never
+    /// get used in practice.
+    /// It's mostly here for code coverage completeness.
+    #[test]
+    fn test_encoder_prefer_range_coder_data() {
+        // Start with a 16-bit buffer.
+        let mut buffer = vec![0_u8; 2];
+        let mut enc = RangeEncoder::new(&mut buffer);
+        // Write 7 raw bits.
+        enc.encode_bits(0x55, 7).unwrap();
+        // Write 12.3 bits of range coder data.
+        enc.encode_uint(1, 2).unwrap();
+        enc.encode_uint(1, 3).unwrap();
+        enc.encode_uint(1, 4).unwrap();
+        enc.encode_uint(1, 5).unwrap();
+        enc.encode_uint(2, 6).unwrap();
+        enc.encode_uint(6, 7).unwrap();
+        enc.done().unwrap();
+
+        drop(enc);
+        let mut dec = RangeDecoder::new(&buffer);
+
+        // The raw bits should have been overwritten by the range coder data.
+        assert_eq!(dec.decode_bits(7), 0x05);
+        // And all the range coder data should have been encoded correctly.
+        assert_eq!(dec.decode_uint(2), 1);
+        assert_eq!(dec.decode_uint(3), 1);
+        assert_eq!(dec.decode_uint(4), 1);
+        assert_eq!(dec.decode_uint(5), 1);
+        assert_eq!(dec.decode_uint(6), 2);
+        assert_eq!(dec.decode_uint(7), 6);
     }
 }

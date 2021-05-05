@@ -384,12 +384,12 @@ impl<'e> RangeEncoder<'e> {
         // We output the minimum number of bits that ensures that the symbols encoded
         // thus far will be decoded correctly regardless of the bits that follow.
         let mut l: i32 = (CODE_BITS - self.log(self.rng)) as i32;
-        let mut msk = (CODE_TOP - 1) >> l;
-        let mut end = (self.val + msk) & !msk;
-        if (end | msk) >= self.val + self.rng {
+        let mut mask = (CODE_TOP - 1) >> l;
+        let mut end = (self.val + mask) & !mask;
+        if (end | mask) >= self.val + self.rng {
             l += 1;
-            msk >>= 1;
-            end = (self.val + msk) & !msk;
+            mask >>= 1;
+            end = (self.val + mask) & !mask;
         }
         while l > 0 {
             self.carry_out(end >> CODE_SHIFT)?;
@@ -418,12 +418,11 @@ impl<'e> RangeEncoder<'e> {
             if self.end_offs >= self.storage {
                 return Err(EncoderError::InternalError("no range coder data"));
             } else {
-                // TODO can we simplify this? (not using sign)
-                let l = -l;
+                l = -l;
+                // If we've busted, don't add too many extra bits to the last byte; it
+                // would corrupt the range coder data, and that's more important.
                 if self.offs + self.end_offs >= self.storage && l < used as i32 {
-                    return Err(EncoderError::InternalError(
-                        "offset + end_offset >= storage",
-                    ));
+                    window &= (1 << l) - 1;
                 }
                 self.buffer[self.storage - self.end_offs - 1] |= window as u8;
             }
