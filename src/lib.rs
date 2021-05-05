@@ -44,6 +44,7 @@ mod decoder_error;
 mod encoder;
 #[cfg(feature = "encoder")]
 mod encoder_error;
+mod math;
 #[cfg(feature = "ogg")]
 mod ogg;
 mod range_coder;

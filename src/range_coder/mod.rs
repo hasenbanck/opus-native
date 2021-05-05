@@ -1,10 +1,10 @@
 //! Implements the range coder.
-use std::mem::size_of;
-
 #[cfg(feature = "decoder")]
 pub(crate) use decoder::RangeDecoder;
 #[cfg(feature = "encoder")]
 pub(crate) use encoder::RangeEncoder;
+
+use crate::math::Log;
 
 #[cfg(feature = "decoder")]
 mod decoder;
@@ -48,7 +48,7 @@ pub(crate) trait Tell {
     /// This will always be slightly larger than the exact value (e.g., all
     /// rounding error is in the positive direction).
     fn tell(&self) -> u32 {
-        self.bits_total() - self.log(self.range())
+        self.bits_total() - self.range().log2p1()
     }
 
     /// Returns the number of bits "used" by the encoded or decoded symbols so far
@@ -66,7 +66,7 @@ pub(crate) trait Tell {
         let correction = [35733, 38967, 42495, 46340, 50535, 55109, 60097, 65535];
         let bits = self.bits_total() << BITRES;
         let range = self.range();
-        let mut l = self.log(range);
+        let mut l = range.log2p1();
         let r = range >> (l - 16);
         let mut b = (r >> 12) - 8;
         if r > correction[b as usize] {
@@ -74,11 +74,6 @@ pub(crate) trait Tell {
         }
         l = (l << 3) + b;
         bits - l
-    }
-
-    #[inline(always)]
-    fn log(&self, x: u32) -> u32 {
-        (size_of::<u32>() * 8) as u32 - x.leading_zeros()
     }
 }
 

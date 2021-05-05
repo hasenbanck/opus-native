@@ -1,4 +1,6 @@
-///! Implements the range decoder.
+//! Implements the range decoder.
+
+use crate::math::Log;
 use crate::range_coder::{
     Tell, CODE_BITS, CODE_BOT, CODE_EXTRA, CODE_TOP, SYM_BITS, SYM_MAX, UINT_BITS, WINDOW_SIZE,
 };
@@ -274,7 +276,7 @@ impl<'d> RangeDecoder<'d> {
     pub(crate) fn decode_uint(&mut self, mut ft: u32) -> u32 {
         debug_assert!(ft > 1);
         ft -= 1;
-        let mut ftb = self.log(ft);
+        let mut ftb = ft.log2p1();
         if ftb > UINT_BITS {
             ftb -= UINT_BITS;
             let ft1 = (ft >> ftb) + 1;
