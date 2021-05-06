@@ -24,7 +24,6 @@
 //! * Good loss robustness and packet loss concealment (PLC)
 //! * Floating point and fixed-point implementation
 //!
-pub(crate) use celt::*;
 #[cfg(feature = "decoder")]
 pub use decoder::*;
 #[cfg(feature = "decoder")]
@@ -33,9 +32,8 @@ pub use decoder_error::*;
 pub use encoder::*;
 #[cfg(feature = "encoder")]
 pub use encoder::*;
-pub(crate) use silk::*;
 
-mod celt;
+pub(crate) mod celt;
 #[cfg(feature = "decoder")]
 mod decoder;
 #[cfg(feature = "decoder")]
@@ -44,11 +42,12 @@ mod decoder_error;
 mod encoder;
 #[cfg(feature = "encoder")]
 mod encoder_error;
-mod math;
+pub(crate) mod math;
+pub(crate) mod modes;
 #[cfg(feature = "ogg")]
 mod ogg;
-mod range_coder;
-mod silk;
+pub(crate) mod range_coder;
+pub(crate) mod silk;
 
 /// Allows applications to use their own sample format.
 pub trait Sample {
@@ -133,7 +132,7 @@ pub enum Bandwidth {
 
 /// Codec mode.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Mode {
+enum CodecMode {
     /// Silk only.
     Silk,
     /// Hybrid mode.

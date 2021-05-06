@@ -276,7 +276,7 @@ impl<'d> RangeDecoder<'d> {
     pub(crate) fn decode_uint(&mut self, mut ft: u32) -> u32 {
         debug_assert!(ft > 1);
         ft -= 1;
-        let mut ftb = ft.log2p1();
+        let mut ftb = ft.ilog();
         if ftb > UINT_BITS {
             ftb -= UINT_BITS;
             let ft1 = (ft >> ftb) + 1;

@@ -48,7 +48,7 @@ pub(crate) trait Tell {
     /// This will always be slightly larger than the exact value (e.g., all
     /// rounding error is in the positive direction).
     fn tell(&self) -> u32 {
-        self.bits_total() - self.range().log2p1()
+        self.bits_total() - self.range().ilog()
     }
 
     /// Returns the number of bits "used" by the encoded or decoded symbols so far
@@ -66,7 +66,7 @@ pub(crate) trait Tell {
         let correction = [35733, 38967, 42495, 46340, 50535, 55109, 60097, 65535];
         let bits = self.bits_total() << BITRES;
         let range = self.range();
-        let mut l = range.log2p1();
+        let mut l = range.ilog();
         let r = range >> (l - 16);
         let mut b = (r >> 12) - 8;
         if r > correction[b as usize] {

@@ -2,6 +2,6 @@
 pub(crate) use decoder::CeltDecoder;
 
 #[cfg(feature = "decoder")]
-mod decoder;
-mod kiss_fft;
-mod mdct;
+pub(crate) mod decoder;
+pub(crate) mod kiss_fft;
+pub(crate) mod mdct;

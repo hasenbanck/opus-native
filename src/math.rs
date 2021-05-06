@@ -5,9 +5,9 @@ pub(crate) trait Log: Sized + Copy + PartialOrd {
     fn leading_zeros_impl(self) -> u32;
     fn zero(self) -> Self;
 
-    /// Log base 2 + 1.
+    /// The minimum number of bits required to store a positive integer in binary, or 0 for a non-positive integer.
     #[inline(always)]
-    fn log2p1(self) -> u32 {
+    fn ilog(self) -> u32 {
         (size_of::<Self>() * 8) as u32 - self.leading_zeros_impl()
     }
 
@@ -15,7 +15,7 @@ pub(crate) trait Log: Sized + Copy + PartialOrd {
     #[inline(always)]
     fn log2(self) -> u32 {
         debug_assert!(self > self.zero());
-        self.log2p1() - 1
+        self.ilog() - 1
     }
 }
 

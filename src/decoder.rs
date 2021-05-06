@@ -1,8 +1,8 @@
 //! Implement the Opus decoder.
 
-use crate::{
-    Bandwidth, CeltDecoder, Channels, DecoderError, Mode, Sample, SamplingRate, SilkDecoder,
-};
+use crate::celt::CeltDecoder;
+use crate::silk::SilkDecoder;
+use crate::{Bandwidth, Channels, CodecMode, DecoderError, Sample, SamplingRate};
 
 /// Configures the decoder on creation.
 ///
@@ -50,8 +50,8 @@ pub struct Decoder {
 
     stream_channels: Channels,
     bandwidth: Bandwidth,
-    mode: Option<Mode>,
-    prev_mode: Option<Mode>,
+    mode: Option<CodecMode>,
+    prev_mode: Option<CodecMode>,
     frame_size: usize,
     prev_redundancy: Option<usize>,
     last_packet_duration: Option<u32>,
@@ -126,8 +126,8 @@ impl Decoder {
     pub fn pitch(&self) -> Option<u32> {
         if let Some(prev_mode) = self.prev_mode {
             match prev_mode {
-                Mode::Celt => Some(self.celt_dec.pitch()),
-                Mode::Silk | Mode::Hybrid => Some(self.silk_dec.pitch()),
+                CodecMode::Celt => Some(self.celt_dec.pitch()),
+                CodecMode::Silk | CodecMode::Hybrid => Some(self.silk_dec.pitch()),
             }
         } else {
             None

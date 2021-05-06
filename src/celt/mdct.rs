@@ -1,5 +1,7 @@
 //! Implements the modified discrete cosine transform.
 
+use crate::celt::kiss_fft::KissFft;
+
 /// This is a simple MDCT implementation that uses a N/4 complex FFT
 /// to do most of the work. It should be relatively straightforward to
 /// plug in pretty much any FFT here.
@@ -12,4 +14,9 @@
 /// MDCT implementation in FFMPEG, but has differences in signs, ordering
 /// and scaling in many places.
 // TODO tests: test_unit_mdct.c
-pub(crate) struct Mdct {}
+pub(crate) struct Mdct {
+    pub(crate) n: usize,
+    pub(crate) max_shift: usize,
+    pub(crate) kfft: Box<[KissFft]>,
+    pub(crate) trig: Box<[f32]>,
+}
