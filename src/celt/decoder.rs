@@ -1,15 +1,15 @@
-//! Implements the CELT decoder.
+//! Implements the Celt decoder.
 
 use crate::{Channels, DecoderError, SamplingRate};
 
-/// The CELT decoder.
+/// The Celt decoder.
 #[derive(Clone, Debug)]
 pub(crate) struct CeltDecoder {
     // Signaling is only used for custom decoder mode.
 }
 
 impl CeltDecoder {
-    /// Creates a new CELT decoder.
+    /// Creates a new Celt decoder.
     pub(crate) fn new(
         _sampling_rate: SamplingRate,
         _channels: Channels,
@@ -18,7 +18,7 @@ impl CeltDecoder {
         Ok(Self {})
     }
 
-    /// Resets the CELT decoder.
+    /// Resets the Celt decoder.
     pub(crate) fn reset(&mut self) -> Result<(), DecoderError> {
         unimplemented!()
     }

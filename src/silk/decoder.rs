@@ -1,8 +1,8 @@
-//! Implements the SILK decoder.
+//! Implements the Silk decoder.
 
 use crate::{Channels, DecoderError, SamplingRate};
 
-/// The SILK decoder.
+/// The Silk decoder.
 #[derive(Clone, Debug)]
 pub(crate) struct SilkDecoder {
     sampling_rate: SamplingRate,
@@ -13,7 +13,7 @@ pub(crate) struct SilkDecoder {
 }
 
 impl SilkDecoder {
-    /// Creates a new SILK decoder. Configures the output sampling rate and output channels.
+    /// Creates a new Silk decoder. Configures the output sampling rate and output channels.
     pub(crate) fn new(
         sampling_rate: SamplingRate,
         channels: Channels,
@@ -27,7 +27,7 @@ impl SilkDecoder {
         })
     }
 
-    /// Resets the SILK decoder.
+    /// Resets the Silk decoder.
     pub(crate) fn reset(&mut self) -> Result<(), DecoderError> {
         unimplemented!()
     }

@@ -5,3 +5,4 @@ pub(crate) use decoder::CeltDecoder;
 pub(crate) mod decoder;
 pub(crate) mod kiss_fft;
 pub(crate) mod mdct;
+pub(crate) mod mode;

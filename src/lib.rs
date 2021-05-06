@@ -6,7 +6,7 @@
 //!
 //! The Opus codec is designed for interactive speech and audio transmission over the Internet.
 //! It is designed by the IETF Codec Working Group and incorporates technology from
-//! Skype's SILK codec and Xiph.Org's CELT codec.
+//! Skype's Silk codec and Xiph.Org's Celt codec.
 //!
 //! The Opus codec is designed to handle a wide range of interactive audio applications,
 //! including Voice over IP, videoconferencing, in-game chat, and even remote live music
@@ -43,7 +43,6 @@ mod encoder;
 #[cfg(feature = "encoder")]
 mod encoder_error;
 pub(crate) mod math;
-pub(crate) mod modes;
 #[cfg(feature = "ogg")]
 mod ogg;
 pub(crate) mod range_coder;

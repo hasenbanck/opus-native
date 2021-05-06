@@ -1,4 +1,4 @@
-//! Implements the mode that CELT supports. Custom modes are not supported.
+//! Implements the only mode that Celt supports. Custom modes are not supported.
 
 use crate::celt::kiss_fft::{KissFft, Twiddle};
 use crate::celt::mdct::Mdct;
@@ -722,6 +722,7 @@ const TWIDDLES_480000_960: [Twiddle; 480] = [
     Twiddle { r: 0.99965732, i: 0.026176948 }, Twiddle { r: 0.99991433, i: 0.013089596 },
 ];
 
+#[allow(clippy::excessive_precision)]
 const KFFT: [KissFft; 4] = [
     KissFft {
         nfft: 480,
@@ -800,7 +801,7 @@ const CACHE_CAPS: [u8; 168] = [
     204, 204, 204, 201, 201, 201, 201, 198, 198, 198, 187, 187, 175, 140, 66, 40,
 ];
 
-/// Opus mode.
+/// Mode configuration for the default and only mode of Celt.
 pub(crate) struct Mode {
     fs: u32,
     overlap: usize,
