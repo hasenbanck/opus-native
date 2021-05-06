@@ -2,6 +2,8 @@
 #![deny(unsafe_code)]
 #![deny(clippy::panic)]
 #![deny(clippy::unwrap_used)]
+// FIXME only temporary until the main library calls are implemented.
+#![allow(unused)]
 //! Implements the free and open audio codec Opus in Rust.
 //!
 //! The Opus codec is designed for interactive speech and audio transmission over the Internet.
