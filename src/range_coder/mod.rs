@@ -184,13 +184,9 @@ mod tests {
         nbits = enc.tell_frac();
         enc.done().unwrap();
 
-        println!(
-            "Encoded {:.2} bits of entropy to {:.2} bits ({:.3}% wasted).",
-            entropy,
-            ldexp(nbits as f64, -3.0),
-            100.0 * (nbits as f64 - ldexp(entropy, 3.0)) / nbits as f64
-        );
-        println!("Packed to {} bytes.", enc.range_bytes());
+        assert!((entropy - 5777073.343410888).abs() < f64::EPSILON);
+        assert!((ldexp(nbits as f64, -3.0) - 5778365.00).abs() < f64::EPSILON);
+        assert_eq!(enc.range_bytes(), 497192);
 
         drop(enc);
         let mut dec = RangeDecoder::new(&buffer);

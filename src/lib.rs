@@ -24,7 +24,6 @@
 //! * Support for multichannel (up to 255 channels)
 //! * Frame sizes from 2.5 ms to 60 ms
 //! * Good loss robustness and packet loss concealment (PLC)
-//! * Floating point and fixed-point implementation
 //!
 #[cfg(feature = "decoder")]
 pub use decoder::*;

@@ -16,5 +16,9 @@ decoder = []
 encoder = []
 ogg = []
 
+[dependencies]
+num-complex = "0.4"
+num-traits = "0.2"
+
 [dev-dependencies]
 nanorand = { version = "0.5", default-features = true, features = ["wyrand"] }

@@ -17,6 +17,6 @@ use crate::celt::kiss_fft::KissFft;
 pub(crate) struct Mdct {
     pub(crate) n: usize,
     pub(crate) max_shift: usize,
-    pub(crate) kfft: Box<[KissFft]>,
-    pub(crate) trig: Box<[f32]>,
+    pub(crate) kfft: &'static [KissFft],
+    pub(crate) trig: &'static [f32],
 }
