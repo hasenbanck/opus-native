@@ -314,7 +314,6 @@ mod tests {
             sig_pow += ansr * ansr + ansi * ansi;
         });
 
-        // TODO compare the SNR values with the C implementation.
         let snr = 10.0 * (sig_pow / err_pow).log10();
         assert!(
             snr > 60.0,
