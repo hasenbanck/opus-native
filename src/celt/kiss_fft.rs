@@ -56,7 +56,7 @@ impl KissFft {
         });
     }
 
-    fn butterfly2(&self, fout: &mut [Complex32], m: usize, n: usize) {
+    fn butterfly2(&self, data: &mut [Complex32], m: usize, n: usize) {
         // We know that m==4 here because the radix-2 is just after a radix-4.
         debug_assert!(m == 4);
 
@@ -67,30 +67,30 @@ impl KissFft {
         (0..n).into_iter().for_each(|i| {
             offset2 = offset + 4;
 
-            let mut t = fout[offset2];
-            fout[offset2] = fout[offset] - t;
-            fout[offset] += t;
+            let mut t = data[offset2];
+            data[offset2] = data[offset] - t;
+            data[offset] += t;
 
-            t.re = (fout[offset2 + 1].re + fout[offset2 + 1].im) * tw;
-            t.im = (fout[offset2 + 1].im - fout[offset2 + 1].re) * tw;
-            fout[offset2 + 1] = fout[offset + 1] - t;
-            fout[offset + 1] += t;
+            t.re = (data[offset2 + 1].re + data[offset2 + 1].im) * tw;
+            t.im = (data[offset2 + 1].im - data[offset2 + 1].re) * tw;
+            data[offset2 + 1] = data[offset + 1] - t;
+            data[offset + 1] += t;
 
-            t.re = fout[offset2 + 2].im;
-            t.im = -fout[offset2 + 2].re;
-            fout[offset2 + 2] = fout[offset + 2] - t;
-            fout[offset + 2] += t;
+            t.re = data[offset2 + 2].im;
+            t.im = -data[offset2 + 2].re;
+            data[offset2 + 2] = data[offset + 2] - t;
+            data[offset + 2] += t;
 
-            t.re = (fout[offset2 + 3].im - fout[offset2 + 3].re) * tw;
-            t.im = (-(fout[offset2 + 3].im + fout[offset2 + 3].re)) * tw;
-            fout[offset2 + 3] = fout[offset + 3] - t;
-            fout[offset + 3] += t;
+            t.re = (data[offset2 + 3].im - data[offset2 + 3].re) * tw;
+            t.im = (-(data[offset2 + 3].im + data[offset2 + 3].re)) * tw;
+            data[offset2 + 3] = data[offset + 3] - t;
+            data[offset + 3] += t;
 
             offset += 8;
         });
     }
 
-    fn butterfly3(&self, fout: &mut [Complex32], stride: usize, m: usize, n: usize, mm: usize) {
+    fn butterfly3(&self, data: &mut [Complex32], stride: usize, m: usize, n: usize, mm: usize) {
         // m is guaranteed to be a multiple of 4.
         debug_assert!(m % 4 == 0);
 
@@ -104,48 +104,48 @@ impl KissFft {
             let mut tw2_offset = 0;
 
             (1..m + 1).into_iter().rev().for_each(|k| {
-                scratch[1] = fout[offset + m] * self.twiddles[tw1_offset];
-                scratch[2] = fout[offset + m2] * self.twiddles[tw2_offset];
+                scratch[1] = data[offset + m] * self.twiddles[tw1_offset];
+                scratch[2] = data[offset + m2] * self.twiddles[tw2_offset];
 
                 scratch[3] = scratch[1] + scratch[2];
                 scratch[0] = scratch[1] - scratch[2];
                 tw1_offset += stride;
                 tw2_offset += stride * 2;
 
-                fout[offset + m] = fout[offset] - (scratch[3] * 0.5);
+                data[offset + m] = data[offset] - (scratch[3] * 0.5);
 
                 scratch[0] *= epi3.im;
 
-                fout[offset] += scratch[3];
+                data[offset] += scratch[3];
 
-                fout[offset + m2].re = fout[offset + m].re + scratch[0].im;
-                fout[offset + m2].im = fout[offset + m].im - scratch[0].re;
+                data[offset + m2].re = data[offset + m].re + scratch[0].im;
+                data[offset + m2].im = data[offset + m].im - scratch[0].re;
 
-                fout[offset + m].re -= scratch[0].im;
-                fout[offset + m].im += scratch[0].re;
+                data[offset + m].re -= scratch[0].im;
+                data[offset + m].im += scratch[0].re;
 
                 offset += 1;
             });
         });
     }
 
-    fn butterfly4(&self, fout: &mut [Complex32], stride: usize, m: usize, n: usize, mm: usize) {
+    fn butterfly4(&self, data: &mut [Complex32], stride: usize, m: usize, n: usize, mm: usize) {
         if m == 1 {
             let mut offset = 0;
 
             // Degenerate case where all the twiddles are 1.
             (0..n).into_iter().for_each(|i| {
-                let scratch0 = fout[offset] - fout[offset + 2];
-                fout[offset] += fout[offset + 2];
-                let mut scratch1 = fout[offset + 1] + fout[offset + 3];
-                fout[offset + 2] = fout[offset] - scratch1;
-                fout[offset] += scratch1;
-                scratch1 = fout[offset + 1] - fout[offset + 3];
+                let scratch0 = data[offset] - data[offset + 2];
+                data[offset] += data[offset + 2];
+                let mut scratch1 = data[offset + 1] + data[offset + 3];
+                data[offset + 2] = data[offset] - scratch1;
+                data[offset] += scratch1;
+                scratch1 = data[offset + 1] - data[offset + 3];
 
-                fout[offset + 1].re = scratch0.re + scratch1.im;
-                fout[offset + 1].im = scratch0.im - scratch1.re;
-                fout[offset + 3].re = scratch0.re - scratch1.im;
-                fout[offset + 3].im = scratch0.im + scratch1.re;
+                data[offset + 1].re = scratch0.re + scratch1.im;
+                data[offset + 1].im = scratch0.im - scratch1.re;
+                data[offset + 3].re = scratch0.re - scratch1.im;
+                data[offset + 3].im = scratch0.im + scratch1.re;
 
                 offset += 4;
             });
@@ -164,24 +164,24 @@ impl KissFft {
                 let mut tw3_offset = 0;
 
                 (0..m).into_iter().for_each(|j| {
-                    scratch[0] = fout[offset + m] * self.twiddles[tw1_offset];
-                    scratch[1] = fout[offset + m2] * self.twiddles[tw2_offset];
-                    scratch[2] = fout[offset + m3] * self.twiddles[tw3_offset];
+                    scratch[0] = data[offset + m] * self.twiddles[tw1_offset];
+                    scratch[1] = data[offset + m2] * self.twiddles[tw2_offset];
+                    scratch[2] = data[offset + m3] * self.twiddles[tw3_offset];
 
-                    scratch[5] = fout[offset] - scratch[1];
-                    fout[offset] += scratch[1];
+                    scratch[5] = data[offset] - scratch[1];
+                    data[offset] += scratch[1];
                     scratch[3] = scratch[0] + scratch[2];
                     scratch[4] = scratch[0] - scratch[2];
-                    fout[offset + m2] = fout[offset] - scratch[3];
+                    data[offset + m2] = data[offset] - scratch[3];
                     tw1_offset += stride;
                     tw2_offset += stride * 2;
                     tw3_offset += stride * 3;
-                    fout[offset] += scratch[3];
+                    data[offset] += scratch[3];
 
-                    fout[offset + m].re = scratch[5].re + scratch[4].im;
-                    fout[offset + m].im = scratch[5].im - scratch[4].re;
-                    fout[offset + m3].re = scratch[5].re - scratch[4].im;
-                    fout[offset + m3].im = scratch[5].im + scratch[4].re;
+                    data[offset + m].re = scratch[5].re + scratch[4].im;
+                    data[offset + m].im = scratch[5].im - scratch[4].re;
+                    data[offset + m3].re = scratch[5].re - scratch[4].im;
+                    data[offset + m3].im = scratch[5].im + scratch[4].re;
 
                     offset += 1;
                 });
@@ -189,7 +189,7 @@ impl KissFft {
         }
     }
 
-    fn butterfly5(&self, fout: &mut [Complex32], stride: usize, m: usize, n: usize, mm: usize) {
+    fn butterfly5(&self, data: &mut [Complex32], stride: usize, m: usize, n: usize, mm: usize) {
         // m is guaranteed to be a multiple of 4.
         debug_assert!(m % 4 == 0);
 
@@ -205,18 +205,18 @@ impl KissFft {
             let mut offset4 = offset0 + 4 * m;
 
             (0..m).into_iter().for_each(|u| {
-                scratch[0] = fout[offset0];
-                scratch[1] = fout[offset1] * self.twiddles[u * stride];
-                scratch[2] = fout[offset2] * self.twiddles[2 * u * stride];
-                scratch[3] = fout[offset3] * self.twiddles[3 * u * stride];
-                scratch[4] = fout[offset4] * self.twiddles[4 * u * stride];
+                scratch[0] = data[offset0];
+                scratch[1] = data[offset1] * self.twiddles[u * stride];
+                scratch[2] = data[offset2] * self.twiddles[2 * u * stride];
+                scratch[3] = data[offset3] * self.twiddles[3 * u * stride];
+                scratch[4] = data[offset4] * self.twiddles[4 * u * stride];
 
                 scratch[7] = scratch[1] + scratch[4];
                 scratch[10] = scratch[1] - scratch[4];
                 scratch[8] = scratch[2] + scratch[3];
                 scratch[9] = scratch[2] - scratch[3];
 
-                fout[offset0] += scratch[7] + scratch[8];
+                data[offset0] += scratch[7] + scratch[8];
 
                 scratch[5].re = scratch[0].re + (scratch[7].re * ya.re + scratch[8].re * yb.re);
                 scratch[5].im = scratch[0].im + (scratch[7].im * ya.re + scratch[8].im * yb.re);
@@ -224,16 +224,16 @@ impl KissFft {
                 scratch[6].re = (scratch[10].im * ya.im + scratch[9].im * yb.im);
                 scratch[6].im = -(scratch[10].re * ya.im + scratch[9].re * yb.im);
 
-                fout[offset1] = scratch[5] - scratch[6];
-                fout[offset4] = scratch[5] + scratch[6];
+                data[offset1] = scratch[5] - scratch[6];
+                data[offset4] = scratch[5] + scratch[6];
 
                 scratch[11].re = scratch[0].re + (scratch[7].re * yb.re + scratch[8].re * ya.re);
                 scratch[11].im = scratch[0].im + (scratch[7].im * yb.re + scratch[8].im * ya.re);
                 scratch[12].re = scratch[9].im * ya.im - scratch[10].im * yb.im;
                 scratch[12].im = scratch[10].re * yb.im - scratch[9].re * ya.im;
 
-                fout[offset2] = scratch[11] + scratch[12];
-                fout[offset3] = scratch[11] - scratch[12];
+                data[offset2] = scratch[11] + scratch[12];
+                data[offset3] = scratch[11] - scratch[12];
 
                 offset0 += 1;
                 offset1 += 1;
@@ -253,46 +253,47 @@ mod tests {
     use nanorand::RNG;
 
     use crate::celt;
+    use crate::celt::Mdct;
 
     use super::*;
 
-    /// Applies the forward FFT on the given data in `fin` and saved the result in `fout`.
-    fn forward(fft: &KissFft, fin: &[Complex32], fout: &mut [Complex32]) {
+    /// Applies the forward FFT on the given data in `input` and saved the result in `output`.
+    fn forward(fft: &KissFft, input: &[Complex32], output: &mut [Complex32]) {
         // Bit-reverse and scale the input.
         (0..fft.nfft).into_iter().for_each(|i| {
-            fout[fft.bitrev[i]] = fin[i] * fft.scale;
+            output[fft.bitrev[i]] = input[i] * fft.scale;
         });
 
-        fft.process(fout);
+        fft.process(output);
     }
 
-    /// Applies the inverse FFT on the given data in `fin` and saved the result in `fout`.
-    fn inverse(fft: &KissFft, fin: &[Complex32], fout: &mut [Complex32]) {
+    /// Applies the inverse FFT on the given data in `input` and saved the result in `output`.
+    fn inverse(fft: &KissFft, input: &[Complex32], output: &mut [Complex32]) {
         // Bit-reverse the input.
         (0..fft.nfft).into_iter().for_each(|i| {
-            fout[fft.bitrev[i]] = fin[i];
+            output[fft.bitrev[i]] = input[i];
         });
 
         (0..fft.nfft).into_iter().for_each(|i| {
-            fout[i].im = -fout[i].im;
+            output[i].im = -output[i].im;
         });
 
-        fft.process(fout);
+        fft.process(output);
 
         (0..fft.nfft).into_iter().for_each(|i| {
-            fout[i].im = -fout[i].im;
+            output[i].im = -output[i].im;
         });
     }
 
-    fn check(fin: &[Complex32], fout: &[Complex32], nfft: usize, is_inverse: bool) {
+    fn check(input: &[Complex32], output: &[Complex32], nfft: usize, is_inverse: bool) {
         let mut err_pow: f64 = 0.0;
         let mut sig_pow: f64 = 0.0;
 
-        fout.iter().enumerate().for_each(|(i, fout)| {
+        output.iter().enumerate().for_each(|(i, fout)| {
             let mut ansr: f64 = 0.0;
             let mut ansi: f64 = 0.0;
 
-            fin.iter().enumerate().for_each(|(k, fin)| {
+            input.iter().enumerate().for_each(|(k, fin)| {
                 let phase = -2.0 * std::f64::consts::PI * i as f64 * k as f64 / nfft as f64;
                 let mut re = phase.cos();
                 let mut im = phase.sin();
@@ -326,10 +327,9 @@ mod tests {
 
     fn test1d(nfft: usize, is_inverse: bool) {
         let mut rng = nanorand::WyRand::new_seed(42);
-        let mut fin = vec![Complex32::default(); nfft];
-        let mut fout = vec![Complex32::default(); nfft];
+        let mut input = vec![Complex32::default(); nfft];
+        let mut output = vec![Complex32::default(); nfft];
 
-        let mode = celt::Mode::default();
         let id = match nfft {
             480 => 0,
             240 => 1,
@@ -337,32 +337,33 @@ mod tests {
             60 => 3,
             _ => return,
         };
-        let fft = &mode.mdct.kfft[id];
+        let mdct = Mdct::default();
+        let fft = &mdct.kfft[id];
 
-        fin.iter_mut().for_each(|x| {
+        input.iter_mut().for_each(|x| {
             x.re = (rng.generate_range::<u32>(0, 32767) as i16 - 16384) as f32;
             x.im = (rng.generate_range::<u32>(0, 32767) as i16 - 16384) as f32;
         });
 
-        fin.iter_mut().for_each(|x| {
+        input.iter_mut().for_each(|x| {
             x.re *= 32768.0;
             x.im *= 32768.0;
         });
 
         if is_inverse {
-            fin.iter_mut().for_each(|x| {
+            input.iter_mut().for_each(|x| {
                 x.re /= nfft as f32;
                 x.im /= nfft as f32;
             });
         }
 
         if is_inverse {
-            inverse(&fft, &fin, &mut fout);
+            inverse(&fft, &input, &mut output);
         } else {
-            forward(&fft, &fin, &mut fout);
+            forward(&fft, &input, &mut output);
         }
 
-        check(&fin, &fout, nfft, is_inverse);
+        check(&input, &output, nfft, is_inverse);
     }
 
     #[test]
