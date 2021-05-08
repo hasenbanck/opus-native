@@ -72,21 +72,21 @@ impl Mdct {
         // Consider the input to be composed of four blocks: [a, b, c, d]
         // Window, shuffle, fold
         {
-            let mut xp1 = overlap >> 1;
-            let mut xp2 = n2 - 1 + (overlap >> 1);
-            let mut yp = 0;
+            let mut ip1 = overlap >> 1;
+            let mut ip2 = n2 - 1 + (overlap >> 1);
+            let mut sp1 = 0;
 
             let mut wp1 = overlap >> 1;
             let mut wp2 = (overlap >> 1) - 1;
 
             // Real part arranged as -d-cR, Imag part arranged as -b+aR.
             (0..((overlap + 3) >> 2)).into_iter().for_each(|i| {
-                self.sp1[yp] = (window[wp2] * input[xp1 + n2]) + (window[wp1] * input[xp2]);
-                self.sp1[yp + 1] = (window[wp1] * input[xp1]) - (window[wp2] * input[xp2 - n2]);
+                self.sp1[sp1] = (window[wp2] * input[ip1 + n2]) + (window[wp1] * input[ip2]);
+                self.sp1[sp1 + 1] = (window[wp1] * input[ip1]) - (window[wp2] * input[ip2 - n2]);
 
-                yp += 2;
-                xp1 += 2;
-                xp2 = xp2.wrapping_sub(2);
+                sp1 += 2;
+                ip1 += 2;
+                ip2 = ip2.wrapping_sub(2);
                 wp1 += 2;
                 wp2 = wp2.wrapping_sub(2);
             });
@@ -98,22 +98,22 @@ impl Mdct {
             (((overlap + 3) >> 2)..n4 - ((overlap + 3) >> 2))
                 .into_iter()
                 .for_each(|i| {
-                    self.sp1[yp] = input[xp2];
-                    self.sp1[yp + 1] = input[xp1];
+                    self.sp1[sp1] = input[ip2];
+                    self.sp1[sp1 + 1] = input[ip1];
 
-                    yp += 2;
-                    xp1 += 2;
-                    xp2 = xp2.wrapping_sub(2);
+                    sp1 += 2;
+                    ip1 += 2;
+                    ip2 = ip2.wrapping_sub(2);
                 });
 
             // Real part arranged as a-bR, Imag part arranged as -c-dR.
             (n4 - ((overlap + 3) >> 2)..n4).into_iter().for_each(|i| {
-                self.sp1[yp] = -(window[wp1] * input[xp1 - n2]) + (window[wp2] * input[xp2]);
-                self.sp1[yp + 1] = (window[wp2] * input[xp1]) + (window[wp1] * input[xp2 + n2]);
+                self.sp1[sp1] = -(window[wp1] * input[ip1 - n2]) + (window[wp2] * input[ip2]);
+                self.sp1[sp1 + 1] = (window[wp2] * input[ip1]) + (window[wp1] * input[ip2 + n2]);
 
-                yp += 2;
-                xp1 += 2;
-                xp2 = xp2.wrapping_sub(2);
+                sp1 += 2;
+                ip1 += 2;
+                ip2 = ip2.wrapping_sub(2);
                 wp1 += 2;
                 wp2 = wp2.wrapping_sub(2);
             });
@@ -121,21 +121,21 @@ impl Mdct {
 
         // Pre-rotation
         {
-            let mut yp = 0;
-            let mut yc = Complex32::zero();
+            let mut sp = 0;
+            let mut tmp = Complex32::zero();
 
             (0..n4).into_iter().for_each(|i| {
                 let t0 = self.trig[i];
                 let t1 = self.trig[n4 + i];
-                let re = self.sp1[yp];
-                let im = self.sp1[yp + 1];
+                let re = self.sp1[sp];
+                let im = self.sp1[sp + 1];
 
-                yc.re = (re * t0) - (im * t1);
-                yc.im = (im * t0) + (re * t1);
-                yc += fft.scale;
-                self.sp2[fft.bitrev[i]] = yc;
+                tmp.re = (re * t0) - (im * t1);
+                tmp.im = (im * t0) + (re * t1);
+                tmp += fft.scale;
+                self.sp2[fft.bitrev[i]] = tmp;
 
-                yp += 2;
+                sp += 2;
             });
         }
 
@@ -143,19 +143,19 @@ impl Mdct {
 
         // Post-rotate
         {
-            let mut fp = 0;
-            let mut yp1 = 0;
-            let mut yp2 = stride * (n2 - 1);
+            let mut sp = 0;
+            let mut op1 = 0;
+            let mut op2 = stride * (n2 - 1);
 
             (0..n4).into_iter().for_each(|i| {
-                output[yp1] =
-                    (self.sp2[fp].im * self.trig[n4 + i]) - (self.sp2[fp].re * self.trig[i]);
-                output[yp2] =
-                    (self.sp2[fp].re * self.trig[n4 + i]) + (self.sp2[fp].im * self.trig[i]);
+                output[op1] =
+                    (self.sp2[sp].im * self.trig[n4 + i]) - (self.sp2[sp].re * self.trig[i]);
+                output[op2] =
+                    (self.sp2[sp].re * self.trig[n4 + i]) + (self.sp2[sp].im * self.trig[i]);
 
-                fp += 1;
-                yp1 += 2 * stride;
-                yp2 = yp2.wrapping_sub(2 * stride);
+                sp += 1;
+                op1 += 2 * stride;
+                op2 = op2.wrapping_sub(2 * stride);
             });
         }
     }
