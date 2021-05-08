@@ -1,5 +1,8 @@
 //! Implements the modified discrete cosine transform.
 
+use num_complex::Complex32;
+use num_traits::Zero;
+
 use crate::celt::kiss_fft::KissFft;
 
 /// This is a simple MDCT implementation that uses a N/4 complex FFT
@@ -31,7 +34,108 @@ impl Mdct {
         shift: usize,
         stride: usize,
     ) {
-        unimplemented!()
+        let fft = &self.kfft[shift];
+        let trig_offset = 0;
+
+        let mut n = self.n;
+        let mut twiddle_offset = 0;
+        (0..fft.shift).into_iter().for_each(|x| {
+            n >>= 1;
+            twiddle_offset += n;
+        });
+        let n2 = n >> 1;
+        let n4 = n >> 2;
+
+        let mut f = vec![0_f32; n2];
+        let mut f2 = vec![Complex32::zero(); n4];
+
+        // Consider the input to be composed of four blocks: [a, b, c, d]
+        // Window, shuffle, fold
+        {
+            let mut xp1 = overlap >> 1;
+            let mut xp2 = n2 - 1 + (overlap >> 1);
+            let mut yp = 0;
+
+            let mut wp1 = overlap >> 1;
+            let mut wp2 = (overlap >> 1) - 1;
+
+            // Real part arranged as -d-cR, Imag part arranged as -b+aR.
+            (0..((overlap + 3) >> 2)).into_iter().for_each(|i| {
+                f[yp] = (window[wp2] * fin[xp1 + n2]) + (window[wp1] * fin[xp2]);
+                f[yp + 1] = (window[wp1] * fin[xp1]) - (window[wp2] * fin[xp2 - n2]);
+
+                yp += 2;
+                xp1 += 2;
+                xp2 = xp2.wrapping_sub(2);
+                wp1 += 2;
+                wp2 = wp2.wrapping_sub(2);
+            });
+
+            wp1 = 0;
+            wp2 = overlap - 1;
+
+            // Real part arranged as a-bR, Imag part arranged as -c-dR.
+            (((overlap + 3) >> 2)..n4 - ((overlap + 3) >> 2))
+                .into_iter()
+                .for_each(|i| {
+                    f[yp] = fin[xp2];
+                    f[yp + 1] = fin[xp1];
+
+                    yp += 2;
+                    xp1 += 2;
+                    xp2 = xp2.wrapping_sub(2);
+                });
+
+            // Real part arranged as a-bR, Imag part arranged as -c-dR.
+            (n4 - ((overlap + 3) >> 2)..n4).into_iter().for_each(|i| {
+                f[yp] = -(window[wp1] * fin[xp1 - n2]) + (window[wp2] * fin[xp2]);
+                f[yp + 1] = (window[wp2] * fin[xp1]) + (window[wp1] * fin[xp2 + n2]);
+
+                yp += 2;
+                xp1 += 2;
+                xp2 = xp2.wrapping_sub(2);
+                wp1 += 2;
+                wp2 = wp2.wrapping_sub(2);
+            });
+        }
+
+        // Pre-rotation
+        {
+            let mut yp = 0;
+            let mut yc = Complex32::zero();
+
+            (0..n4).into_iter().for_each(|i| {
+                let t0 = self.trig[i];
+                let t1 = self.trig[n4 + i];
+                let re = f[yp];
+                let im = f[yp + 1];
+
+                yc.re = (re * t0) - (im * t1);
+                yc.im = (im * t0) + (re * t1);
+                yc += fft.scale;
+                f2[fft.bitrev[i]] = yc;
+
+                yp += 2;
+            });
+        }
+
+        fft.process(&mut f2);
+
+        // Post-rotate
+        {
+            let mut fp = 0;
+            let mut yp1 = 0;
+            let mut yp2 = stride * (n2 - 1);
+
+            (0..n4).into_iter().for_each(|i| {
+                fout[yp1] = (f2[fp].im * self.trig[n4 + i]) - (f2[fp].re * self.trig[i]);
+                fout[yp2] = (f2[fp].re * self.trig[n4 + i]) + (f2[fp].im * self.trig[i]);
+
+                fp += 1;
+                yp1 += 2 * stride;
+                yp2 = yp2.wrapping_sub(2 * stride);
+            });
+        }
     }
 
     /// Compute a backward MDCT (no scaling) and performs weighted overlap-add
@@ -127,7 +231,7 @@ mod tests {
     fn test1d(nfft: usize, is_inverse: bool) {
         let mut rng = nanorand::WyRand::new_seed(42);
 
-        let mode = celt::Mode::default();
+        let mut mode = celt::Mode::default();
         let shift = match nfft {
             1920 => 0,
             960 => 1,
@@ -171,22 +275,6 @@ mod tests {
 
     #[test]
     fn test_dft() {
-        test1d(32, false);
-        test1d(32, true);
-        test1d(256, false);
-        test1d(256, true);
-        test1d(512, false);
-        test1d(512, true);
-        test1d(1024, false);
-        test1d(1024, true);
-        test1d(2048, false);
-        test1d(2048, true);
-        test1d(36, false);
-        test1d(36, true);
-        test1d(40, false);
-        test1d(40, true);
-        test1d(60, false);
-        test1d(60, true);
         test1d(120, false);
         test1d(120, true);
         test1d(240, false);

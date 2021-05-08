@@ -22,35 +22,8 @@ pub(crate) struct KissFft {
 }
 
 impl KissFft {
-    /// Applies the forward FFT on the given data in `fin` and saved the result in `fout`.
-    pub(crate) fn forward(&self, fin: &[Complex32], fout: &mut [Complex32]) {
-        // Bit-reverse and scale the input.
-        (0..self.nfft).into_iter().for_each(|i| {
-            fout[self.bitrev[i]] = fin[i] * self.scale;
-        });
-
-        self.fft(fout);
-    }
-
-    /// Applies the inverse FFT on the given data in `fin` and saved the result in `fout`.
-    pub(crate) fn inverse(&self, fin: &[Complex32], fout: &mut [Complex32]) {
-        // Bit-reverse the input
-        (0..self.nfft).into_iter().for_each(|i| {
-            fout[self.bitrev[i]] = fin[i];
-        });
-
-        (0..self.nfft).into_iter().for_each(|i| {
-            fout[i].im = -fout[i].im;
-        });
-
-        self.fft(fout);
-
-        (0..self.nfft).into_iter().for_each(|i| {
-            fout[i].im = -fout[i].im;
-        });
-    }
-
-    fn fft(&self, fout: &mut [Complex32]) {
+    /// N/4 complex FFT.
+    pub(crate) fn process(&self, data: &mut [Complex32]) {
         let mut strides = [0_usize; MAX_FACTORS];
         strides[0] = 1;
 
@@ -71,10 +44,10 @@ impl KissFft {
 
             let stride = strides[i] << self.shift;
             match self.factors[2 * i] {
-                2 => self.butterfly2(fout, m, strides[i]),
-                4 => self.butterfly4(fout, stride, m, strides[i], m2),
-                3 => self.butterfly3(fout, stride, m, strides[i], m2),
-                5 => self.butterfly5(fout, stride, m, strides[i], m2),
+                2 => self.butterfly2(data, m, strides[i]),
+                4 => self.butterfly4(data, stride, m, strides[i], m2),
+                3 => self.butterfly3(data, stride, m, strides[i], m2),
+                5 => self.butterfly5(data, stride, m, strides[i], m2),
                 _ => {
                     unreachable!()
                 }
@@ -283,6 +256,34 @@ mod tests {
 
     use super::*;
 
+    /// Applies the forward FFT on the given data in `fin` and saved the result in `fout`.
+    fn forward(fft: &KissFft, fin: &[Complex32], fout: &mut [Complex32]) {
+        // Bit-reverse and scale the input.
+        (0..fft.nfft).into_iter().for_each(|i| {
+            fout[fft.bitrev[i]] = fin[i] * fft.scale;
+        });
+
+        fft.process(fout);
+    }
+
+    /// Applies the inverse FFT on the given data in `fin` and saved the result in `fout`.
+    fn inverse(fft: &KissFft, fin: &[Complex32], fout: &mut [Complex32]) {
+        // Bit-reverse the input.
+        (0..fft.nfft).into_iter().for_each(|i| {
+            fout[fft.bitrev[i]] = fin[i];
+        });
+
+        (0..fft.nfft).into_iter().for_each(|i| {
+            fout[i].im = -fout[i].im;
+        });
+
+        fft.process(fout);
+
+        (0..fft.nfft).into_iter().for_each(|i| {
+            fout[i].im = -fout[i].im;
+        });
+    }
+
     fn check(fin: &[Complex32], fout: &[Complex32], nfft: usize, is_inverse: bool) {
         let mut err_pow: f64 = 0.0;
         let mut sig_pow: f64 = 0.0;
@@ -356,9 +357,9 @@ mod tests {
         }
 
         if is_inverse {
-            fft.inverse(&fin, &mut fout);
+            inverse(&fft, &fin, &mut fout);
         } else {
-            fft.forward(&fin, &mut fout);
+            forward(&fft, &fin, &mut fout);
         }
 
         check(&fin, &fout, nfft, is_inverse);
