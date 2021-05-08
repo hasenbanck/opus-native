@@ -26,8 +26,7 @@ impl KissFft {
     pub(crate) fn forward(&self, fin: &[Complex32], fout: &mut [Complex32]) {
         // Bit-reverse and scale the input.
         (0..self.nfft).into_iter().for_each(|i| {
-            fout[self.bitrev[i]].re = self.scale * fin[i].re;
-            fout[self.bitrev[i]].im = self.scale * fin[i].im;
+            fout[self.bitrev[i]] = fin[i] * self.scale;
         });
 
         self.fft(fout);
@@ -317,7 +316,7 @@ mod tests {
         let snr = 10.0 * (sig_pow / err_pow).log10();
         assert!(
             snr > 60.0,
-            "nfft={}, inverse={}, poor snr: {}",
+            "nfft={}, inverse={}, poor snr={}",
             nfft,
             is_inverse,
             snr

@@ -35,7 +35,7 @@ const CODE_EXTRA: u32 = (CODE_BITS - 2) % SYM_BITS + 1;
 
 /// Provides common functionality for the range encoder and decoder.
 pub(crate) trait Tell {
-    /// Mut return the total number of whole bits read or written.
+    /// Must return the total number of whole bits read or written.
     fn bits_total(&self) -> u32;
     /// Must return the number of values in the current range.
     fn range(&self) -> u32;
