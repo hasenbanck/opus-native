@@ -1,9 +1,11 @@
 //! Implements the modified discrete cosine transform.
 
+use std::ops::Sub;
+
 use num_complex::Complex32;
 use num_traits::Zero;
 
-use crate::celt::kiss_fft::KissFft;
+use crate::celt::kiss_fft::{KissFft, FFT_CONFIGURATION};
 
 /// This is a simple MDCT implementation that uses a N/4 complex FFT
 /// to do most of the work. It should be relatively straightforward to
@@ -17,24 +19,19 @@ use crate::celt::kiss_fft::KissFft;
 /// MDCT implementation in FFMPEG, but has differences in signs, ordering
 /// and scaling in many places.
 pub(crate) struct Mdct {
-    pub(crate) n: usize,
-    pub(crate) max_shift: usize,
-    pub(crate) kfft: &'static [KissFft],
-    pub(crate) trig: &'static [f32],
-    // Scratchpads
-    pub(crate) sp1: Vec<f32>,
-    pub(crate) sp2: Vec<Complex32>,
+    /// Float scratch pad.
+    pub(crate) spf: Vec<f32>,
+    /// Complex scratch pad.
+    pub(crate) spc: Vec<Complex32>,
 }
+
+const N: usize = 1920;
 
 impl Default for Mdct {
     fn default() -> Self {
         Self {
-            n: 1920,
-            max_shift: 3,
-            kfft: KFFT,
-            trig: TWIDDLES,
-            sp1: vec![],
-            sp2: vec![],
+            spf: vec![],
+            spc: vec![],
         }
     }
 }
@@ -50,74 +47,75 @@ impl Mdct {
         shift: usize,
         stride: usize,
     ) {
-        let fft = &self.kfft[shift];
-        let trig_offset = 0;
-
-        let mut n = self.n;
-        let mut twiddle_offset = 0;
-        (0..fft.shift).into_iter().for_each(|x| {
+        let mut n = N;
+        let mut trigp = 0;
+        (0..shift).into_iter().for_each(|x| {
             n >>= 1;
-            twiddle_offset += n;
+            trigp += n;
         });
         let n2 = n >> 1;
         let n4 = n >> 2;
 
-        if self.sp1.len() < n2 {
-            self.sp1.resize(n2, 0.0);
+        if self.spf.len() < n2 {
+            self.spf.resize(n2, 0.0);
         }
-        if self.sp2.len() < n4 {
-            self.sp2.resize(n4, Complex32::zero());
+        if self.spc.len() < n4 {
+            self.spc.resize(n4, Complex32::zero());
         }
 
         // Consider the input to be composed of four blocks: [a, b, c, d]
         // Window, shuffle, fold
         {
-            let mut ip1 = overlap >> 1;
-            let mut ip2 = n2 - 1 + (overlap >> 1);
-            let mut sp1 = 0;
+            let overlap_offset = (overlap + 3) >> 2;
 
-            let mut wp1 = overlap >> 1;
-            let mut wp2 = (overlap >> 1) - 1;
+            let mut ip0 = overlap >> 1;
+            let mut ip1 = ip0 + n2 - 1;
+            let mut sp = 0;
+
+            let mut wp0 = overlap >> 1;
+            let mut wp1 = wp0 - 1;
 
             // Real part arranged as -d-cR, Imag part arranged as -b+aR.
-            (0..((overlap + 3) >> 2)).into_iter().for_each(|i| {
-                self.sp1[sp1] = (window[wp2] * input[ip1 + n2]) + (window[wp1] * input[ip2]);
-                self.sp1[sp1 + 1] = (window[wp1] * input[ip1]) - (window[wp2] * input[ip2 - n2]);
+            (0..overlap_offset).into_iter().for_each(|i| {
+                self.spf[sp] = (window[wp1] * input[ip0 + n2]) + (window[wp0] * input[ip1]);
+                self.spf[sp + 1] = (window[wp0] * input[ip0]) - (window[wp1] * input[ip1 - n2]);
 
-                sp1 += 2;
-                ip1 += 2;
-                ip2 = ip2.wrapping_sub(2);
-                wp1 += 2;
-                wp2 = wp2.wrapping_sub(2);
+                sp += 2;
+                ip0 += 2;
+                ip1 -= 2;
+                wp0 += 2;
+                wp1 = wp1.wrapping_sub(2);
             });
 
-            wp1 = 0;
-            wp2 = overlap - 1;
+            wp0 = 0;
+            wp1 = overlap - 1;
 
             // Real part arranged as a-bR, Imag part arranged as -c-dR.
-            (((overlap + 3) >> 2)..n4 - ((overlap + 3) >> 2))
+            (overlap_offset..n4 - overlap_offset)
                 .into_iter()
                 .for_each(|i| {
-                    self.sp1[sp1] = input[ip2];
-                    self.sp1[sp1 + 1] = input[ip1];
+                    self.spf[sp] = input[ip1];
+                    self.spf[sp + 1] = input[ip0];
 
-                    sp1 += 2;
-                    ip1 += 2;
-                    ip2 = ip2.wrapping_sub(2);
+                    sp += 2;
+                    ip0 += 2;
+                    ip1 -= 2;
                 });
 
             // Real part arranged as a-bR, Imag part arranged as -c-dR.
-            (n4 - ((overlap + 3) >> 2)..n4).into_iter().for_each(|i| {
-                self.sp1[sp1] = -(window[wp1] * input[ip1 - n2]) + (window[wp2] * input[ip2]);
-                self.sp1[sp1 + 1] = (window[wp2] * input[ip1]) + (window[wp1] * input[ip2 + n2]);
+            (n4 - overlap_offset..n4).into_iter().for_each(|i| {
+                self.spf[sp] = -(window[wp0] * input[ip0 - n2]) + (window[wp1] * input[ip1]);
+                self.spf[sp + 1] = (window[wp1] * input[ip0]) + (window[wp0] * input[ip1 + n2]);
 
-                sp1 += 2;
-                ip1 += 2;
-                ip2 = ip2.wrapping_sub(2);
-                wp1 += 2;
-                wp2 = wp2.wrapping_sub(2);
+                sp += 2;
+                ip0 += 2;
+                ip1 -= 2;
+                wp0 += 2;
+                wp1 = wp1.wrapping_sub(2);
             });
         }
+
+        let fft = &FFT_CONFIGURATION[shift];
 
         // Pre-rotation
         {
@@ -125,37 +123,37 @@ impl Mdct {
             let mut tmp = Complex32::zero();
 
             (0..n4).into_iter().for_each(|i| {
-                let t0 = self.trig[i];
-                let t1 = self.trig[n4 + i];
-                let re = self.sp1[sp];
-                let im = self.sp1[sp + 1];
+                let t0 = TRIG[trigp + i];
+                let t1 = TRIG[trigp + n4 + i];
+                let re = self.spf[sp];
+                let im = self.spf[sp + 1];
 
                 tmp.re = (re * t0) - (im * t1);
                 tmp.im = (im * t0) + (re * t1);
-                tmp += fft.scale;
-                self.sp2[fft.bitrev[i]] = tmp;
+                tmp *= fft.scale;
+                self.spc[fft.bitrev[i]] = tmp;
 
                 sp += 2;
             });
         }
 
-        fft.process(&mut self.sp2);
+        fft.process(&mut self.spc);
 
         // Post-rotate
         {
             let mut sp = 0;
-            let mut op1 = 0;
-            let mut op2 = stride * (n2 - 1);
+            let mut op0 = 0;
+            let mut op1 = stride * (n2 - 1);
 
             (0..n4).into_iter().for_each(|i| {
+                output[op0] =
+                    (self.spc[sp].im * TRIG[trigp + n4 + i]) - (self.spc[sp].re * TRIG[trigp + i]);
                 output[op1] =
-                    (self.sp2[sp].im * self.trig[n4 + i]) - (self.sp2[sp].re * self.trig[i]);
-                output[op2] =
-                    (self.sp2[sp].re * self.trig[n4 + i]) + (self.sp2[sp].im * self.trig[i]);
+                    (self.spc[sp].re * TRIG[trigp + n4 + i]) + (self.spc[sp].im * TRIG[trigp + i]);
 
                 sp += 1;
-                op1 += 2 * stride;
-                op2 = op2.wrapping_sub(2 * stride);
+                op0 += 2 * stride;
+                op1 = op1.wrapping_sub(2 * stride);
             });
         }
     }
@@ -164,20 +162,111 @@ impl Mdct {
     /// (scales implicitly by 1/2).
     pub(crate) fn backward(
         &mut self,
-        fin: &[f32],
-        fout: &mut [f32],
+        input: &[f32],
+        output: &mut [f32],
         window: &[f32],
         overlap: usize,
         shift: usize,
         stride: usize,
     ) {
-        unimplemented!()
+        let mut n = N;
+        let mut trigp = 0;
+        (0..shift).into_iter().for_each(|x| {
+            n >>= 1;
+            trigp += n;
+        });
+        let n2 = n >> 1;
+        let n4 = n >> 2;
+
+        if self.spc.len() < n4 {
+            self.spc.resize(n4, Complex32::zero())
+        }
+
+        let fft = &FFT_CONFIGURATION[shift];
+
+        // Pre-rotation
+        {
+            let mut ip0 = 0;
+            let mut ip1 = stride * (n2 - 1);
+
+            fft.bitrev.iter().enumerate().for_each(|(i, rev)| {
+                let re = ((input[ip1] * TRIG[trigp + i]) + (input[ip0] * TRIG[trigp + n4 + i]));
+                let im = ((input[ip0] * TRIG[trigp + i]) - (input[ip1] * TRIG[trigp + n4 + i]));
+
+                // We swap real and imag because we use an FFT instead of an IFFT.
+                self.spc[*rev].re = im;
+                self.spc[*rev].im = re;
+
+                // Storing the pre-rotation directly in the bitrev order.
+                ip0 += 2 * stride;
+                ip1 = ip1.wrapping_sub(2 * stride);
+            });
+        }
+
+        fft.process(&mut self.spc);
+
+        // Post-rotate and de-shuffle.
+        {
+            // Even fields.
+            let half_overlap = overlap >> 1;
+            output[half_overlap..half_overlap + n2]
+                .iter_mut()
+                .step_by(2)
+                .enumerate()
+                .for_each(|(i, x)| {
+                    let c = &self.spc[i];
+
+                    // We'd scale up by 2 here, but instead it's done when mixing the windows.
+                    let t0 = TRIG[trigp + i];
+                    let t1 = TRIG[trigp + n4 + i];
+
+                    // We swap real and imag because we're using an FFT instead of an IFFT.
+                    *x = (c.im * t0) + (c.re * t1);
+                });
+
+            // Odd fields.
+            output[half_overlap + 1..half_overlap + n2]
+                .iter_mut()
+                .step_by(2)
+                .enumerate()
+                .for_each(|(i, x)| {
+                    let c = &self.spc[n4 - i - 1];
+
+                    // We'd scale up by 2 here, but instead it's done when mixing the windows.
+                    let t0 = TRIG[trigp + n4 - i - 1];
+                    let t1 = TRIG[trigp + n2 - i - 1];
+
+                    // We swap real and imag because we're using an FFT instead of an IFFT.
+                    *x = (c.im * t1) - (c.re * t0);
+                });
+        }
+
+        // Mirror on both sides for TDAC.
+        {
+            let mut op0 = 0;
+            let mut op1 = overlap - 1;
+            let mut wp0 = 0;
+            let mut wp1 = overlap - 1;
+
+            (0..overlap / 2).into_iter().for_each(|i| {
+                let x0 = output[op1];
+                let x1 = output[op0];
+                output[op0] = (window[wp1] * x1) - (window[wp0] * x0);
+                output[op1] = (window[wp0] * x1) + (window[wp1] * x0);
+
+                op0 += 1;
+                op1 -= 1;
+
+                wp0 += 1;
+                wp1 -= 1;
+            });
+        }
     }
 }
 
 #[rustfmt::skip]
 #[allow(clippy::excessive_precision)]
-const TWIDDLES: &[f32] = &[
+const TRIG: &[f32] = &[
     0.99999994, 0.99999321, 0.99997580, 0.99994773, 0.99990886,
     0.99985933, 0.99979913, 0.99972820, 0.99964654, 0.99955416,
     0.99945110, 0.99933738, 0.99921292, 0.99907774, 0.99893188,
@@ -540,345 +629,6 @@ const TWIDDLES: &[f32] = &[
     -0.99186671, -0.99485862, -0.99716878, -0.99879545, -0.99973762,
 ];
 
-const BITREV_480: &[usize] = &[
-    0, 96, 192, 288, 384, 32, 128, 224, 320, 416, 64, 160, 256, 352, 448, 8, 104, 200, 296, 392,
-    40, 136, 232, 328, 424, 72, 168, 264, 360, 456, 16, 112, 208, 304, 400, 48, 144, 240, 336, 432,
-    80, 176, 272, 368, 464, 24, 120, 216, 312, 408, 56, 152, 248, 344, 440, 88, 184, 280, 376, 472,
-    4, 100, 196, 292, 388, 36, 132, 228, 324, 420, 68, 164, 260, 356, 452, 12, 108, 204, 300, 396,
-    44, 140, 236, 332, 428, 76, 172, 268, 364, 460, 20, 116, 212, 308, 404, 52, 148, 244, 340, 436,
-    84, 180, 276, 372, 468, 28, 124, 220, 316, 412, 60, 156, 252, 348, 444, 92, 188, 284, 380, 476,
-    1, 97, 193, 289, 385, 33, 129, 225, 321, 417, 65, 161, 257, 353, 449, 9, 105, 201, 297, 393,
-    41, 137, 233, 329, 425, 73, 169, 265, 361, 457, 17, 113, 209, 305, 401, 49, 145, 241, 337, 433,
-    81, 177, 273, 369, 465, 25, 121, 217, 313, 409, 57, 153, 249, 345, 441, 89, 185, 281, 377, 473,
-    5, 101, 197, 293, 389, 37, 133, 229, 325, 421, 69, 165, 261, 357, 453, 13, 109, 205, 301, 397,
-    45, 141, 237, 333, 429, 77, 173, 269, 365, 461, 21, 117, 213, 309, 405, 53, 149, 245, 341, 437,
-    85, 181, 277, 373, 469, 29, 125, 221, 317, 413, 61, 157, 253, 349, 445, 93, 189, 285, 381, 477,
-    2, 98, 194, 290, 386, 34, 130, 226, 322, 418, 66, 162, 258, 354, 450, 10, 106, 202, 298, 394,
-    42, 138, 234, 330, 426, 74, 170, 266, 362, 458, 18, 114, 210, 306, 402, 50, 146, 242, 338, 434,
-    82, 178, 274, 370, 466, 26, 122, 218, 314, 410, 58, 154, 250, 346, 442, 90, 186, 282, 378, 474,
-    6, 102, 198, 294, 390, 38, 134, 230, 326, 422, 70, 166, 262, 358, 454, 14, 110, 206, 302, 398,
-    46, 142, 238, 334, 430, 78, 174, 270, 366, 462, 22, 118, 214, 310, 406, 54, 150, 246, 342, 438,
-    86, 182, 278, 374, 470, 30, 126, 222, 318, 414, 62, 158, 254, 350, 446, 94, 190, 286, 382, 478,
-    3, 99, 195, 291, 387, 35, 131, 227, 323, 419, 67, 163, 259, 355, 451, 11, 107, 203, 299, 395,
-    43, 139, 235, 331, 427, 75, 171, 267, 363, 459, 19, 115, 211, 307, 403, 51, 147, 243, 339, 435,
-    83, 179, 275, 371, 467, 27, 123, 219, 315, 411, 59, 155, 251, 347, 443, 91, 187, 283, 379, 475,
-    7, 103, 199, 295, 391, 39, 135, 231, 327, 423, 71, 167, 263, 359, 455, 15, 111, 207, 303, 399,
-    47, 143, 239, 335, 431, 79, 175, 271, 367, 463, 23, 119, 215, 311, 407, 55, 151, 247, 343, 439,
-    87, 183, 279, 375, 471, 31, 127, 223, 319, 415, 63, 159, 255, 351, 447, 95, 191, 287, 383, 479,
-];
-
-const BITREV_240: &[usize] = &[
-    0, 48, 96, 144, 192, 16, 64, 112, 160, 208, 32, 80, 128, 176, 224, 4, 52, 100, 148, 196, 20,
-    68, 116, 164, 212, 36, 84, 132, 180, 228, 8, 56, 104, 152, 200, 24, 72, 120, 168, 216, 40, 88,
-    136, 184, 232, 12, 60, 108, 156, 204, 28, 76, 124, 172, 220, 44, 92, 140, 188, 236, 1, 49, 97,
-    145, 193, 17, 65, 113, 161, 209, 33, 81, 129, 177, 225, 5, 53, 101, 149, 197, 21, 69, 117, 165,
-    213, 37, 85, 133, 181, 229, 9, 57, 105, 153, 201, 25, 73, 121, 169, 217, 41, 89, 137, 185, 233,
-    13, 61, 109, 157, 205, 29, 77, 125, 173, 221, 45, 93, 141, 189, 237, 2, 50, 98, 146, 194, 18,
-    66, 114, 162, 210, 34, 82, 130, 178, 226, 6, 54, 102, 150, 198, 22, 70, 118, 166, 214, 38, 86,
-    134, 182, 230, 10, 58, 106, 154, 202, 26, 74, 122, 170, 218, 42, 90, 138, 186, 234, 14, 62,
-    110, 158, 206, 30, 78, 126, 174, 222, 46, 94, 142, 190, 238, 3, 51, 99, 147, 195, 19, 67, 115,
-    163, 211, 35, 83, 131, 179, 227, 7, 55, 103, 151, 199, 23, 71, 119, 167, 215, 39, 87, 135, 183,
-    231, 11, 59, 107, 155, 203, 27, 75, 123, 171, 219, 43, 91, 139, 187, 235, 15, 63, 111, 159,
-    207, 31, 79, 127, 175, 223, 47, 95, 143, 191, 239,
-];
-
-const BITREV_120: &[usize] = &[
-    0, 24, 48, 72, 96, 8, 32, 56, 80, 104, 16, 40, 64, 88, 112, 4, 28, 52, 76, 100, 12, 36, 60, 84,
-    108, 20, 44, 68, 92, 116, 1, 25, 49, 73, 97, 9, 33, 57, 81, 105, 17, 41, 65, 89, 113, 5, 29,
-    53, 77, 101, 13, 37, 61, 85, 109, 21, 45, 69, 93, 117, 2, 26, 50, 74, 98, 10, 34, 58, 82, 106,
-    18, 42, 66, 90, 114, 6, 30, 54, 78, 102, 14, 38, 62, 86, 110, 22, 46, 70, 94, 118, 3, 27, 51,
-    75, 99, 11, 35, 59, 83, 107, 19, 43, 67, 91, 115, 7, 31, 55, 79, 103, 15, 39, 63, 87, 111, 23,
-    47, 71, 95, 119,
-];
-
-const BITREV_60: &[usize] = &[
-    0, 12, 24, 36, 48, 4, 16, 28, 40, 52, 8, 20, 32, 44, 56, 1, 13, 25, 37, 49, 5, 17, 29, 41, 53,
-    9, 21, 33, 45, 57, 2, 14, 26, 38, 50, 6, 18, 30, 42, 54, 10, 22, 34, 46, 58, 3, 15, 27, 39, 51,
-    7, 19, 31, 43, 55, 11, 23, 35, 47, 59,
-];
-
-#[rustfmt::skip]
-#[allow(clippy::approx_constant)]
-#[allow(clippy::excessive_precision)]
-const TWIDDLES_480000_960: &[Complex32] = &[
-    Complex32 { re: 1.0000000, im: -0.0000000 }, Complex32 { re: 0.99991433, im: -0.013089596 },
-    Complex32 { re: 0.99965732, im: -0.026176948 }, Complex32 { re: 0.99922904, im: -0.039259816 },
-    Complex32 { re: 0.99862953, im: -0.052335956 }, Complex32 { re: 0.99785892, im: -0.065403129 },
-    Complex32 { re: 0.99691733, im: -0.078459096 }, Complex32 { re: 0.99580493, im: -0.091501619 },
-    Complex32 { re: 0.99452190, im: -0.10452846 }, Complex32 { re: 0.99306846, im: -0.11753740 },
-    Complex32 { re: 0.99144486, im: -0.13052619 }, Complex32 { re: 0.98965139, im: -0.14349262 },
-    Complex32 { re: 0.98768834, im: -0.15643447 }, Complex32 { re: 0.98555606, im: -0.16934950 },
-    Complex32 { re: 0.98325491, im: -0.18223553 }, Complex32 { re: 0.98078528, im: -0.19509032 },
-    Complex32 { re: 0.97814760, im: -0.20791169 }, Complex32 { re: 0.97534232, im: -0.22069744 },
-    Complex32 { re: 0.97236992, im: -0.23344536 }, Complex32 { re: 0.96923091, im: -0.24615329 },
-    Complex32 { re: 0.96592583, im: -0.25881905 }, Complex32 { re: 0.96245524, im: -0.27144045 },
-    Complex32 { re: 0.95881973, im: -0.28401534 }, Complex32 { re: 0.95501994, im: -0.29654157 },
-    Complex32 { re: 0.95105652, im: -0.30901699 }, Complex32 { re: 0.94693013, im: -0.32143947 },
-    Complex32 { re: 0.94264149, im: -0.33380686 }, Complex32 { re: 0.93819134, im: -0.34611706 },
-    Complex32 { re: 0.93358043, im: -0.35836795 }, Complex32 { re: 0.92880955, im: -0.37055744 },
-    Complex32 { re: 0.92387953, im: -0.38268343 }, Complex32 { re: 0.91879121, im: -0.39474386 },
-    Complex32 { re: 0.91354546, im: -0.40673664 }, Complex32 { re: 0.90814317, im: -0.41865974 },
-    Complex32 { re: 0.90258528, im: -0.43051110 }, Complex32 { re: 0.89687274, im: -0.44228869 },
-    Complex32 { re: 0.89100652, im: -0.45399050 }, Complex32 { re: 0.88498764, im: -0.46561452 },
-    Complex32 { re: 0.87881711, im: -0.47715876 }, Complex32 { re: 0.87249601, im: -0.48862124 },
-    Complex32 { re: 0.86602540, im: -0.50000000 }, Complex32 { re: 0.85940641, im: -0.51129309 },
-    Complex32 { re: 0.85264016, im: -0.52249856 }, Complex32 { re: 0.84572782, im: -0.53361452 },
-    Complex32 { re: 0.83867057, im: -0.54463904 }, Complex32 { re: 0.83146961, im: -0.55557023 },
-    Complex32 { re: 0.82412619, im: -0.56640624 }, Complex32 { re: 0.81664156, im: -0.57714519 },
-    Complex32 { re: 0.80901699, im: -0.58778525 }, Complex32 { re: 0.80125381, im: -0.59832460 },
-    Complex32 { re: 0.79335334, im: -0.60876143 }, Complex32 { re: 0.78531693, im: -0.61909395 },
-    Complex32 { re: 0.77714596, im: -0.62932039 }, Complex32 { re: 0.76884183, im: -0.63943900 },
-    Complex32 { re: 0.76040597, im: -0.64944805 }, Complex32 { re: 0.75183981, im: -0.65934582 },
-    Complex32 { re: 0.74314483, im: -0.66913061 }, Complex32 { re: 0.73432251, im: -0.67880075 },
-    Complex32 { re: 0.72537437, im: -0.68835458 }, Complex32 { re: 0.71630194, im: -0.69779046 },
-    Complex32 { re: 0.70710678, im: -0.70710678 }, Complex32 { re: 0.69779046, im: -0.71630194 },
-    Complex32 { re: 0.68835458, im: -0.72537437 }, Complex32 { re: 0.67880075, im: -0.73432251 },
-    Complex32 { re: 0.66913061, im: -0.74314483 }, Complex32 { re: 0.65934582, im: -0.75183981 },
-    Complex32 { re: 0.64944805, im: -0.76040597 }, Complex32 { re: 0.63943900, im: -0.76884183 },
-    Complex32 { re: 0.62932039, im: -0.77714596 }, Complex32 { re: 0.61909395, im: -0.78531693 },
-    Complex32 { re: 0.60876143, im: -0.79335334 }, Complex32 { re: 0.59832460, im: -0.80125381 },
-    Complex32 { re: 0.58778525, im: -0.80901699 }, Complex32 { re: 0.57714519, im: -0.81664156 },
-    Complex32 { re: 0.56640624, im: -0.82412619 }, Complex32 { re: 0.55557023, im: -0.83146961 },
-    Complex32 { re: 0.54463904, im: -0.83867057 }, Complex32 { re: 0.53361452, im: -0.84572782 },
-    Complex32 { re: 0.52249856, im: -0.85264016 }, Complex32 { re: 0.51129309, im: -0.85940641 },
-    Complex32 { re: 0.50000000, im: -0.86602540 }, Complex32 { re: 0.48862124, im: -0.87249601 },
-    Complex32 { re: 0.47715876, im: -0.87881711 }, Complex32 { re: 0.46561452, im: -0.88498764 },
-    Complex32 { re: 0.45399050, im: -0.89100652 }, Complex32 { re: 0.44228869, im: -0.89687274 },
-    Complex32 { re: 0.43051110, im: -0.90258528 }, Complex32 { re: 0.41865974, im: -0.90814317 },
-    Complex32 { re: 0.40673664, im: -0.91354546 }, Complex32 { re: 0.39474386, im: -0.91879121 },
-    Complex32 { re: 0.38268343, im: -0.92387953 }, Complex32 { re: 0.37055744, im: -0.92880955 },
-    Complex32 { re: 0.35836795, im: -0.93358043 }, Complex32 { re: 0.34611706, im: -0.93819134 },
-    Complex32 { re: 0.33380686, im: -0.94264149 }, Complex32 { re: 0.32143947, im: -0.94693013 },
-    Complex32 { re: 0.30901699, im: -0.95105652 }, Complex32 { re: 0.29654157, im: -0.95501994 },
-    Complex32 { re: 0.28401534, im: -0.95881973 }, Complex32 { re: 0.27144045, im: -0.96245524 },
-    Complex32 { re: 0.25881905, im: -0.96592583 }, Complex32 { re: 0.24615329, im: -0.96923091 },
-    Complex32 { re: 0.23344536, im: -0.97236992 }, Complex32 { re: 0.22069744, im: -0.97534232 },
-    Complex32 { re: 0.20791169, im: -0.97814760 }, Complex32 { re: 0.19509032, im: -0.98078528 },
-    Complex32 { re: 0.18223553, im: -0.98325491 }, Complex32 { re: 0.16934950, im: -0.98555606 },
-    Complex32 { re: 0.15643447, im: -0.98768834 }, Complex32 { re: 0.14349262, im: -0.98965139 },
-    Complex32 { re: 0.13052619, im: -0.99144486 }, Complex32 { re: 0.11753740, im: -0.99306846 },
-    Complex32 { re: 0.10452846, im: -0.99452190 }, Complex32 { re: 0.091501619, im: -0.99580493 },
-    Complex32 { re: 0.078459096, im: -0.99691733 }, Complex32 { re: 0.065403129, im: -0.99785892 },
-    Complex32 { re: 0.052335956, im: -0.99862953 }, Complex32 { re: 0.039259816, im: -0.99922904 },
-    Complex32 { re: 0.026176948, im: -0.99965732 }, Complex32 { re: 0.013089596, im: -0.99991433 },
-    Complex32 { re: 6.1230318e-17, im: -1.0000000 }, Complex32 { re: -0.013089596, im: -0.99991433 },
-    Complex32 { re: -0.026176948, im: -0.99965732 }, Complex32 { re: -0.039259816, im: -0.99922904 },
-    Complex32 { re: -0.052335956, im: -0.99862953 }, Complex32 { re: -0.065403129, im: -0.99785892 },
-    Complex32 { re: -0.078459096, im: -0.99691733 }, Complex32 { re: -0.091501619, im: -0.99580493 },
-    Complex32 { re: -0.10452846, im: -0.99452190 }, Complex32 { re: -0.11753740, im: -0.99306846 },
-    Complex32 { re: -0.13052619, im: -0.99144486 }, Complex32 { re: -0.14349262, im: -0.98965139 },
-    Complex32 { re: -0.15643447, im: -0.98768834 }, Complex32 { re: -0.16934950, im: -0.98555606 },
-    Complex32 { re: -0.18223553, im: -0.98325491 }, Complex32 { re: -0.19509032, im: -0.98078528 },
-    Complex32 { re: -0.20791169, im: -0.97814760 }, Complex32 { re: -0.22069744, im: -0.97534232 },
-    Complex32 { re: -0.23344536, im: -0.97236992 }, Complex32 { re: -0.24615329, im: -0.96923091 },
-    Complex32 { re: -0.25881905, im: -0.96592583 }, Complex32 { re: -0.27144045, im: -0.96245524 },
-    Complex32 { re: -0.28401534, im: -0.95881973 }, Complex32 { re: -0.29654157, im: -0.95501994 },
-    Complex32 { re: -0.30901699, im: -0.95105652 }, Complex32 { re: -0.32143947, im: -0.94693013 },
-    Complex32 { re: -0.33380686, im: -0.94264149 }, Complex32 { re: -0.34611706, im: -0.93819134 },
-    Complex32 { re: -0.35836795, im: -0.93358043 }, Complex32 { re: -0.37055744, im: -0.92880955 },
-    Complex32 { re: -0.38268343, im: -0.92387953 }, Complex32 { re: -0.39474386, im: -0.91879121 },
-    Complex32 { re: -0.40673664, im: -0.91354546 }, Complex32 { re: -0.41865974, im: -0.90814317 },
-    Complex32 { re: -0.43051110, im: -0.90258528 }, Complex32 { re: -0.44228869, im: -0.89687274 },
-    Complex32 { re: -0.45399050, im: -0.89100652 }, Complex32 { re: -0.46561452, im: -0.88498764 },
-    Complex32 { re: -0.47715876, im: -0.87881711 }, Complex32 { re: -0.48862124, im: -0.87249601 },
-    Complex32 { re: -0.50000000, im: -0.86602540 }, Complex32 { re: -0.51129309, im: -0.85940641 },
-    Complex32 { re: -0.52249856, im: -0.85264016 }, Complex32 { re: -0.53361452, im: -0.84572782 },
-    Complex32 { re: -0.54463904, im: -0.83867057 }, Complex32 { re: -0.55557023, im: -0.83146961 },
-    Complex32 { re: -0.56640624, im: -0.82412619 }, Complex32 { re: -0.57714519, im: -0.81664156 },
-    Complex32 { re: -0.58778525, im: -0.80901699 }, Complex32 { re: -0.59832460, im: -0.80125381 },
-    Complex32 { re: -0.60876143, im: -0.79335334 }, Complex32 { re: -0.61909395, im: -0.78531693 },
-    Complex32 { re: -0.62932039, im: -0.77714596 }, Complex32 { re: -0.63943900, im: -0.76884183 },
-    Complex32 { re: -0.64944805, im: -0.76040597 }, Complex32 { re: -0.65934582, im: -0.75183981 },
-    Complex32 { re: -0.66913061, im: -0.74314483 }, Complex32 { re: -0.67880075, im: -0.73432251 },
-    Complex32 { re: -0.68835458, im: -0.72537437 }, Complex32 { re: -0.69779046, im: -0.71630194 },
-    Complex32 { re: -0.70710678, im: -0.70710678 }, Complex32 { re: -0.71630194, im: -0.69779046 },
-    Complex32 { re: -0.72537437, im: -0.68835458 }, Complex32 { re: -0.73432251, im: -0.67880075 },
-    Complex32 { re: -0.74314483, im: -0.66913061 }, Complex32 { re: -0.75183981, im: -0.65934582 },
-    Complex32 { re: -0.76040597, im: -0.64944805 }, Complex32 { re: -0.76884183, im: -0.63943900 },
-    Complex32 { re: -0.77714596, im: -0.62932039 }, Complex32 { re: -0.78531693, im: -0.61909395 },
-    Complex32 { re: -0.79335334, im: -0.60876143 }, Complex32 { re: -0.80125381, im: -0.59832460 },
-    Complex32 { re: -0.80901699, im: -0.58778525 }, Complex32 { re: -0.81664156, im: -0.57714519 },
-    Complex32 { re: -0.82412619, im: -0.56640624 }, Complex32 { re: -0.83146961, im: -0.55557023 },
-    Complex32 { re: -0.83867057, im: -0.54463904 }, Complex32 { re: -0.84572782, im: -0.53361452 },
-    Complex32 { re: -0.85264016, im: -0.52249856 }, Complex32 { re: -0.85940641, im: -0.51129309 },
-    Complex32 { re: -0.86602540, im: -0.50000000 }, Complex32 { re: -0.87249601, im: -0.48862124 },
-    Complex32 { re: -0.87881711, im: -0.47715876 }, Complex32 { re: -0.88498764, im: -0.46561452 },
-    Complex32 { re: -0.89100652, im: -0.45399050 }, Complex32 { re: -0.89687274, im: -0.44228869 },
-    Complex32 { re: -0.90258528, im: -0.43051110 }, Complex32 { re: -0.90814317, im: -0.41865974 },
-    Complex32 { re: -0.91354546, im: -0.40673664 }, Complex32 { re: -0.91879121, im: -0.39474386 },
-    Complex32 { re: -0.92387953, im: -0.38268343 }, Complex32 { re: -0.92880955, im: -0.37055744 },
-    Complex32 { re: -0.93358043, im: -0.35836795 }, Complex32 { re: -0.93819134, im: -0.34611706 },
-    Complex32 { re: -0.94264149, im: -0.33380686 }, Complex32 { re: -0.94693013, im: -0.32143947 },
-    Complex32 { re: -0.95105652, im: -0.30901699 }, Complex32 { re: -0.95501994, im: -0.29654157 },
-    Complex32 { re: -0.95881973, im: -0.28401534 }, Complex32 { re: -0.96245524, im: -0.27144045 },
-    Complex32 { re: -0.96592583, im: -0.25881905 }, Complex32 { re: -0.96923091, im: -0.24615329 },
-    Complex32 { re: -0.97236992, im: -0.23344536 }, Complex32 { re: -0.97534232, im: -0.22069744 },
-    Complex32 { re: -0.97814760, im: -0.20791169 }, Complex32 { re: -0.98078528, im: -0.19509032 },
-    Complex32 { re: -0.98325491, im: -0.18223553 }, Complex32 { re: -0.98555606, im: -0.16934950 },
-    Complex32 { re: -0.98768834, im: -0.15643447 }, Complex32 { re: -0.98965139, im: -0.14349262 },
-    Complex32 { re: -0.99144486, im: -0.13052619 }, Complex32 { re: -0.99306846, im: -0.11753740 },
-    Complex32 { re: -0.99452190, im: -0.10452846 }, Complex32 { re: -0.99580493, im: -0.091501619 },
-    Complex32 { re: -0.99691733, im: -0.078459096 }, Complex32 { re: -0.99785892, im: -0.065403129 },
-    Complex32 { re: -0.99862953, im: -0.052335956 }, Complex32 { re: -0.99922904, im: -0.039259816 },
-    Complex32 { re: -0.99965732, im: -0.026176948 }, Complex32 { re: -0.99991433, im: -0.013089596 },
-    Complex32 { re: -1.0000000, im: -1.2246064e-16 }, Complex32 { re: -0.99991433, im: 0.013089596 },
-    Complex32 { re: -0.99965732, im: 0.026176948 }, Complex32 { re: -0.99922904, im: 0.039259816 },
-    Complex32 { re: -0.99862953, im: 0.052335956 }, Complex32 { re: -0.99785892, im: 0.065403129 },
-    Complex32 { re: -0.99691733, im: 0.078459096 }, Complex32 { re: -0.99580493, im: 0.091501619 },
-    Complex32 { re: -0.99452190, im: 0.10452846 }, Complex32 { re: -0.99306846, im: 0.11753740 },
-    Complex32 { re: -0.99144486, im: 0.13052619 }, Complex32 { re: -0.98965139, im: 0.14349262 },
-    Complex32 { re: -0.98768834, im: 0.15643447 }, Complex32 { re: -0.98555606, im: 0.16934950 },
-    Complex32 { re: -0.98325491, im: 0.18223553 }, Complex32 { re: -0.98078528, im: 0.19509032 },
-    Complex32 { re: -0.97814760, im: 0.20791169 }, Complex32 { re: -0.97534232, im: 0.22069744 },
-    Complex32 { re: -0.97236992, im: 0.23344536 }, Complex32 { re: -0.96923091, im: 0.24615329 },
-    Complex32 { re: -0.96592583, im: 0.25881905 }, Complex32 { re: -0.96245524, im: 0.27144045 },
-    Complex32 { re: -0.95881973, im: 0.28401534 }, Complex32 { re: -0.95501994, im: 0.29654157 },
-    Complex32 { re: -0.95105652, im: 0.30901699 }, Complex32 { re: -0.94693013, im: 0.32143947 },
-    Complex32 { re: -0.94264149, im: 0.33380686 }, Complex32 { re: -0.93819134, im: 0.34611706 },
-    Complex32 { re: -0.93358043, im: 0.35836795 }, Complex32 { re: -0.92880955, im: 0.37055744 },
-    Complex32 { re: -0.92387953, im: 0.38268343 }, Complex32 { re: -0.91879121, im: 0.39474386 },
-    Complex32 { re: -0.91354546, im: 0.40673664 }, Complex32 { re: -0.90814317, im: 0.41865974 },
-    Complex32 { re: -0.90258528, im: 0.43051110 }, Complex32 { re: -0.89687274, im: 0.44228869 },
-    Complex32 { re: -0.89100652, im: 0.45399050 }, Complex32 { re: -0.88498764, im: 0.46561452 },
-    Complex32 { re: -0.87881711, im: 0.47715876 }, Complex32 { re: -0.87249601, im: 0.48862124 },
-    Complex32 { re: -0.86602540, im: 0.50000000 }, Complex32 { re: -0.85940641, im: 0.51129309 },
-    Complex32 { re: -0.85264016, im: 0.52249856 }, Complex32 { re: -0.84572782, im: 0.53361452 },
-    Complex32 { re: -0.83867057, im: 0.54463904 }, Complex32 { re: -0.83146961, im: 0.55557023 },
-    Complex32 { re: -0.82412619, im: 0.56640624 }, Complex32 { re: -0.81664156, im: 0.57714519 },
-    Complex32 { re: -0.80901699, im: 0.58778525 }, Complex32 { re: -0.80125381, im: 0.59832460 },
-    Complex32 { re: -0.79335334, im: 0.60876143 }, Complex32 { re: -0.78531693, im: 0.61909395 },
-    Complex32 { re: -0.77714596, im: 0.62932039 }, Complex32 { re: -0.76884183, im: 0.63943900 },
-    Complex32 { re: -0.76040597, im: 0.64944805 }, Complex32 { re: -0.75183981, im: 0.65934582 },
-    Complex32 { re: -0.74314483, im: 0.66913061 }, Complex32 { re: -0.73432251, im: 0.67880075 },
-    Complex32 { re: -0.72537437, im: 0.68835458 }, Complex32 { re: -0.71630194, im: 0.69779046 },
-    Complex32 { re: -0.70710678, im: 0.70710678 }, Complex32 { re: -0.69779046, im: 0.71630194 },
-    Complex32 { re: -0.68835458, im: 0.72537437 }, Complex32 { re: -0.67880075, im: 0.73432251 },
-    Complex32 { re: -0.66913061, im: 0.74314483 }, Complex32 { re: -0.65934582, im: 0.75183981 },
-    Complex32 { re: -0.64944805, im: 0.76040597 }, Complex32 { re: -0.63943900, im: 0.76884183 },
-    Complex32 { re: -0.62932039, im: 0.77714596 }, Complex32 { re: -0.61909395, im: 0.78531693 },
-    Complex32 { re: -0.60876143, im: 0.79335334 }, Complex32 { re: -0.59832460, im: 0.80125381 },
-    Complex32 { re: -0.58778525, im: 0.80901699 }, Complex32 { re: -0.57714519, im: 0.81664156 },
-    Complex32 { re: -0.56640624, im: 0.82412619 }, Complex32 { re: -0.55557023, im: 0.83146961 },
-    Complex32 { re: -0.54463904, im: 0.83867057 }, Complex32 { re: -0.53361452, im: 0.84572782 },
-    Complex32 { re: -0.52249856, im: 0.85264016 }, Complex32 { re: -0.51129309, im: 0.85940641 },
-    Complex32 { re: -0.50000000, im: 0.86602540 }, Complex32 { re: -0.48862124, im: 0.87249601 },
-    Complex32 { re: -0.47715876, im: 0.87881711 }, Complex32 { re: -0.46561452, im: 0.88498764 },
-    Complex32 { re: -0.45399050, im: 0.89100652 }, Complex32 { re: -0.44228869, im: 0.89687274 },
-    Complex32 { re: -0.43051110, im: 0.90258528 }, Complex32 { re: -0.41865974, im: 0.90814317 },
-    Complex32 { re: -0.40673664, im: 0.91354546 }, Complex32 { re: -0.39474386, im: 0.91879121 },
-    Complex32 { re: -0.38268343, im: 0.92387953 }, Complex32 { re: -0.37055744, im: 0.92880955 },
-    Complex32 { re: -0.35836795, im: 0.93358043 }, Complex32 { re: -0.34611706, im: 0.93819134 },
-    Complex32 { re: -0.33380686, im: 0.94264149 }, Complex32 { re: -0.32143947, im: 0.94693013 },
-    Complex32 { re: -0.30901699, im: 0.95105652 }, Complex32 { re: -0.29654157, im: 0.95501994 },
-    Complex32 { re: -0.28401534, im: 0.95881973 }, Complex32 { re: -0.27144045, im: 0.96245524 },
-    Complex32 { re: -0.25881905, im: 0.96592583 }, Complex32 { re: -0.24615329, im: 0.96923091 },
-    Complex32 { re: -0.23344536, im: 0.97236992 }, Complex32 { re: -0.22069744, im: 0.97534232 },
-    Complex32 { re: -0.20791169, im: 0.97814760 }, Complex32 { re: -0.19509032, im: 0.98078528 },
-    Complex32 { re: -0.18223553, im: 0.98325491 }, Complex32 { re: -0.16934950, im: 0.98555606 },
-    Complex32 { re: -0.15643447, im: 0.98768834 }, Complex32 { re: -0.14349262, im: 0.98965139 },
-    Complex32 { re: -0.13052619, im: 0.99144486 }, Complex32 { re: -0.11753740, im: 0.99306846 },
-    Complex32 { re: -0.10452846, im: 0.99452190 }, Complex32 { re: -0.091501619, im: 0.99580493 },
-    Complex32 { re: -0.078459096, im: 0.99691733 }, Complex32 { re: -0.065403129, im: 0.99785892 },
-    Complex32 { re: -0.052335956, im: 0.99862953 }, Complex32 { re: -0.039259816, im: 0.99922904 },
-    Complex32 { re: -0.026176948, im: 0.99965732 }, Complex32 { re: -0.013089596, im: 0.99991433 },
-    Complex32 { re: -1.8369095e-16, im: 1.0000000 }, Complex32 { re: 0.013089596, im: 0.99991433 },
-    Complex32 { re: 0.026176948, im: 0.99965732 }, Complex32 { re: 0.039259816, im: 0.99922904 },
-    Complex32 { re: 0.052335956, im: 0.99862953 }, Complex32 { re: 0.065403129, im: 0.99785892 },
-    Complex32 { re: 0.078459096, im: 0.99691733 }, Complex32 { re: 0.091501619, im: 0.99580493 },
-    Complex32 { re: 0.10452846, im: 0.99452190 }, Complex32 { re: 0.11753740, im: 0.99306846 },
-    Complex32 { re: 0.13052619, im: 0.99144486 }, Complex32 { re: 0.14349262, im: 0.98965139 },
-    Complex32 { re: 0.15643447, im: 0.98768834 }, Complex32 { re: 0.16934950, im: 0.98555606 },
-    Complex32 { re: 0.18223553, im: 0.98325491 }, Complex32 { re: 0.19509032, im: 0.98078528 },
-    Complex32 { re: 0.20791169, im: 0.97814760 }, Complex32 { re: 0.22069744, im: 0.97534232 },
-    Complex32 { re: 0.23344536, im: 0.97236992 }, Complex32 { re: 0.24615329, im: 0.96923091 },
-    Complex32 { re: 0.25881905, im: 0.96592583 }, Complex32 { re: 0.27144045, im: 0.96245524 },
-    Complex32 { re: 0.28401534, im: 0.95881973 }, Complex32 { re: 0.29654157, im: 0.95501994 },
-    Complex32 { re: 0.30901699, im: 0.95105652 }, Complex32 { re: 0.32143947, im: 0.94693013 },
-    Complex32 { re: 0.33380686, im: 0.94264149 }, Complex32 { re: 0.34611706, im: 0.93819134 },
-    Complex32 { re: 0.35836795, im: 0.93358043 }, Complex32 { re: 0.37055744, im: 0.92880955 },
-    Complex32 { re: 0.38268343, im: 0.92387953 }, Complex32 { re: 0.39474386, im: 0.91879121 },
-    Complex32 { re: 0.40673664, im: 0.91354546 }, Complex32 { re: 0.41865974, im: 0.90814317 },
-    Complex32 { re: 0.43051110, im: 0.90258528 }, Complex32 { re: 0.44228869, im: 0.89687274 },
-    Complex32 { re: 0.45399050, im: 0.89100652 }, Complex32 { re: 0.46561452, im: 0.88498764 },
-    Complex32 { re: 0.47715876, im: 0.87881711 }, Complex32 { re: 0.48862124, im: 0.87249601 },
-    Complex32 { re: 0.50000000, im: 0.86602540 }, Complex32 { re: 0.51129309, im: 0.85940641 },
-    Complex32 { re: 0.52249856, im: 0.85264016 }, Complex32 { re: 0.53361452, im: 0.84572782 },
-    Complex32 { re: 0.54463904, im: 0.83867057 }, Complex32 { re: 0.55557023, im: 0.83146961 },
-    Complex32 { re: 0.56640624, im: 0.82412619 }, Complex32 { re: 0.57714519, im: 0.81664156 },
-    Complex32 { re: 0.58778525, im: 0.80901699 }, Complex32 { re: 0.59832460, im: 0.80125381 },
-    Complex32 { re: 0.60876143, im: 0.79335334 }, Complex32 { re: 0.61909395, im: 0.78531693 },
-    Complex32 { re: 0.62932039, im: 0.77714596 }, Complex32 { re: 0.63943900, im: 0.76884183 },
-    Complex32 { re: 0.64944805, im: 0.76040597 }, Complex32 { re: 0.65934582, im: 0.75183981 },
-    Complex32 { re: 0.66913061, im: 0.74314483 }, Complex32 { re: 0.67880075, im: 0.73432251 },
-    Complex32 { re: 0.68835458, im: 0.72537437 }, Complex32 { re: 0.69779046, im: 0.71630194 },
-    Complex32 { re: 0.70710678, im: 0.70710678 }, Complex32 { re: 0.71630194, im: 0.69779046 },
-    Complex32 { re: 0.72537437, im: 0.68835458 }, Complex32 { re: 0.73432251, im: 0.67880075 },
-    Complex32 { re: 0.74314483, im: 0.66913061 }, Complex32 { re: 0.75183981, im: 0.65934582 },
-    Complex32 { re: 0.76040597, im: 0.64944805 }, Complex32 { re: 0.76884183, im: 0.63943900 },
-    Complex32 { re: 0.77714596, im: 0.62932039 }, Complex32 { re: 0.78531693, im: 0.61909395 },
-    Complex32 { re: 0.79335334, im: 0.60876143 }, Complex32 { re: 0.80125381, im: 0.59832460 },
-    Complex32 { re: 0.80901699, im: 0.58778525 }, Complex32 { re: 0.81664156, im: 0.57714519 },
-    Complex32 { re: 0.82412619, im: 0.56640624 }, Complex32 { re: 0.83146961, im: 0.55557023 },
-    Complex32 { re: 0.83867057, im: 0.54463904 }, Complex32 { re: 0.84572782, im: 0.53361452 },
-    Complex32 { re: 0.85264016, im: 0.52249856 }, Complex32 { re: 0.85940641, im: 0.51129309 },
-    Complex32 { re: 0.86602540, im: 0.50000000 }, Complex32 { re: 0.87249601, im: 0.48862124 },
-    Complex32 { re: 0.87881711, im: 0.47715876 }, Complex32 { re: 0.88498764, im: 0.46561452 },
-    Complex32 { re: 0.89100652, im: 0.45399050 }, Complex32 { re: 0.89687274, im: 0.44228869 },
-    Complex32 { re: 0.90258528, im: 0.43051110 }, Complex32 { re: 0.90814317, im: 0.41865974 },
-    Complex32 { re: 0.91354546, im: 0.40673664 }, Complex32 { re: 0.91879121, im: 0.39474386 },
-    Complex32 { re: 0.92387953, im: 0.38268343 }, Complex32 { re: 0.92880955, im: 0.37055744 },
-    Complex32 { re: 0.93358043, im: 0.35836795 }, Complex32 { re: 0.93819134, im: 0.34611706 },
-    Complex32 { re: 0.94264149, im: 0.33380686 }, Complex32 { re: 0.94693013, im: 0.32143947 },
-    Complex32 { re: 0.95105652, im: 0.30901699 }, Complex32 { re: 0.95501994, im: 0.29654157 },
-    Complex32 { re: 0.95881973, im: 0.28401534 }, Complex32 { re: 0.96245524, im: 0.27144045 },
-    Complex32 { re: 0.96592583, im: 0.25881905 }, Complex32 { re: 0.96923091, im: 0.24615329 },
-    Complex32 { re: 0.97236992, im: 0.23344536 }, Complex32 { re: 0.97534232, im: 0.22069744 },
-    Complex32 { re: 0.97814760, im: 0.20791169 }, Complex32 { re: 0.98078528, im: 0.19509032 },
-    Complex32 { re: 0.98325491, im: 0.18223553 }, Complex32 { re: 0.98555606, im: 0.16934950 },
-    Complex32 { re: 0.98768834, im: 0.15643447 }, Complex32 { re: 0.98965139, im: 0.14349262 },
-    Complex32 { re: 0.99144486, im: 0.13052619 }, Complex32 { re: 0.99306846, im: 0.11753740 },
-    Complex32 { re: 0.99452190, im: 0.10452846 }, Complex32 { re: 0.99580493, im: 0.091501619 },
-    Complex32 { re: 0.99691733, im: 0.078459096 }, Complex32 { re: 0.99785892, im: 0.065403129 },
-    Complex32 { re: 0.99862953, im: 0.052335956 }, Complex32 { re: 0.99922904, im: 0.039259816 },
-    Complex32 { re: 0.99965732, im: 0.026176948 }, Complex32 { re: 0.99991433, im: 0.013089596 },
-];
-
-#[allow(clippy::excessive_precision)]
-pub(crate) const KFFT: &[KissFft; 4] = &[
-    KissFft {
-        nfft: 480,
-        scale: 0.002083333,
-        shift: 0,
-        factors: [5, 96, 3, 32, 4, 8, 2, 4, 4, 1, 0, 0, 0, 0, 0, 0],
-        bitrev: &BITREV_480,
-        twiddles: &TWIDDLES_480000_960,
-    },
-    KissFft {
-        nfft: 240,
-        scale: 0.004166667,
-        shift: 1,
-        factors: [5, 48, 3, 16, 4, 4, 4, 1, 0, 0, 0, 0, 0, 0, 0, 0],
-        bitrev: &BITREV_240,
-        twiddles: &TWIDDLES_480000_960,
-    },
-    KissFft {
-        nfft: 120,
-        scale: 0.008333333,
-        shift: 2,
-        factors: [5, 24, 3, 8, 2, 4, 4, 1, 0, 0, 0, 0, 0, 0, 0, 0],
-        bitrev: &BITREV_120,
-        twiddles: &TWIDDLES_480000_960,
-    },
-    KissFft {
-        nfft: 60,
-        scale: 0.016666667,
-        shift: 3,
-        factors: [5, 12, 3, 4, 4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        bitrev: &BITREV_60,
-        twiddles: &TWIDDLES_480000_960,
-    },
-];
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::panic)]
@@ -892,7 +642,7 @@ mod tests {
 
     use super::*;
 
-    fn check_inv(fin: &[f32], fout: &[f32], nfft: usize) {
+    fn check(input: &[f32], output: &[f32], nfft: usize) {
         let mut err_pow: f64 = 0.0;
         let mut sig_pow: f64 = 0.0;
 
@@ -901,22 +651,23 @@ mod tests {
 
             (0..nfft).into_iter().for_each(|k| {
                 let phase: f64 =
-                    2.0 * PI * (k as f64 + 0.75 * nfft as f64) * (i as f64 + 0.5) / nfft as f64;
+                    2.0 * PI * (k as f64 + 0.5 + 0.25 * nfft as f64) * (i as f64 + 0.5)
+                        / nfft as f64;
                 let mut re = phase.cos();
 
                 re /= (nfft / 4) as f64;
 
-                ansr += fin[k] as f64 * re;
+                ansr += input[k] as f64 * re;
             });
 
-            let difr = ansr - fout[i] as f64;
+            let difr = ansr - output[i] as f64;
             err_pow += difr * difr;
             sig_pow += ansr * ansr;
         });
 
         let snr = 10.0 * (sig_pow / err_pow).log10();
         assert!(
-            snr > 60.0,
+            snr > 130.0,
             "nfft={}, inverse={}, poor snr={}",
             nfft,
             true,
@@ -924,7 +675,7 @@ mod tests {
         );
     }
 
-    fn check(fin: &[f32], fout: &[f32], nfft: usize) {
+    fn check_inv(input: &[f32], output: &[f32], nfft: usize) {
         let mut err_pow: f64 = 0.0;
         let mut sig_pow: f64 = 0.0;
 
@@ -933,13 +684,14 @@ mod tests {
 
             (0..nfft / 2).into_iter().for_each(|k| {
                 let phase: f64 =
-                    2.0 * PI * (i as f64 + 0.75 * nfft as f64) * (k as f64 + 0.5) / nfft as f64;
+                    2.0 * PI * (i as f64 + 0.50 + 0.25 * nfft as f64) * (k as f64 + 0.5)
+                        / nfft as f64;
                 let mut re = phase.cos();
 
-                ansr += fin[k] as f64 * re;
+                ansr += input[k] as f64 * re;
             });
 
-            let difr = ansr - fout[i] as f64;
+            let difr = ansr - output[i] as f64;
             err_pow += difr * difr;
             sig_pow += ansr * ansr;
         });
@@ -957,7 +709,7 @@ mod tests {
     fn test1d(nfft: usize, is_inverse: bool) {
         let mut rng = nanorand::WyRand::new_seed(42);
 
-        let mut mode = celt::Mode::default();
+        let mut mdct = Mdct::default();
         let shift = match nfft {
             1920 => 0,
             960 => 1,
@@ -965,44 +717,41 @@ mod tests {
             240 => 3,
             _ => return,
         };
-        let mut mdct = Mdct::default();
 
-        let mut fin = vec![0_f32; nfft];
-        let mut fout = vec![0_f32; nfft];
+        let mut input = vec![0_f32; nfft];
+        let mut output = vec![0_f32; nfft];
         let mut window = vec![1.0_f32; nfft / 2];
 
-        fin.iter_mut().for_each(|x| {
+        input.iter_mut().for_each(|x| {
             *x = (rng.generate_range::<u32>(0, 32768) as i16 - 16384) as f32;
             *x *= 32768.0;
         });
 
         if is_inverse {
-            fin.iter_mut().for_each(|x| {
+            input.iter_mut().for_each(|x| {
                 *x /= nfft as f32;
             });
         }
 
-        let fin_copy = fin.clone();
+        let input_copy = input.clone();
 
         if is_inverse {
-            mdct.backward(&fin, &mut fout, &window, nfft / 2, shift, 1);
+            mdct.backward(&input, &mut output, &window, nfft / 2, shift, 1);
 
             // Apply TDAC because backward() no longer does that.
             (0..nfft / 4).into_iter().for_each(|i| {
-                fout[nfft - i - 1] = fout[nfft / 2 + i];
+                output[nfft - i - 1] = output[nfft / 2 + i];
             });
 
-            check_inv(&fin, &fout, nfft);
+            check_inv(&input, &output, nfft);
         } else {
-            mdct.forward(&fin, &mut fout, &window, nfft / 2, shift, 1);
-            check(&fin_copy, &fout, nfft);
+            mdct.forward(&input, &mut output, &window, nfft / 2, shift, 1);
+            check(&input_copy, &output, nfft);
         }
     }
 
     #[test]
     fn test_dft() {
-        test1d(120, false);
-        test1d(120, true);
         test1d(240, false);
         test1d(240, true);
         test1d(480, false);
