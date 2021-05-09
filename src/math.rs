@@ -1,6 +1,6 @@
 use std::mem::size_of;
 
-use num_traits::{FromPrimitive, Num, PrimInt, Zero};
+use num_traits::{PrimInt, Zero};
 
 /// Commonly used logarithms on integer primitives.
 pub(crate) trait Log: PrimInt + Zero {
@@ -102,7 +102,7 @@ mod tests {
         while x < 1677700.0 {
             let error = ((LOG2_E * x.ln()) - x.log2()).abs();
             assert!(error <= 0.0009, "x = {}, error = {}", x, error);
-            x += (x / 8.0);
+            x += x / 8.0;
         }
     }
 
@@ -135,7 +135,7 @@ mod tests {
 
         (64..=16320).into_iter().for_each(|i| {
             let q = bitexact_cos(i);
-            chk ^= (i32::from(q) * i32::from(i));
+            chk ^= i32::from(q) * i32::from(i);
             let d = last - q;
 
             if d > max_d {

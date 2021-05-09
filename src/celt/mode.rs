@@ -1,11 +1,5 @@
 //! Implements the only mode that Celt supports. Custom modes are not supported.
 
-use num_complex::Complex32;
-use num_traits::Zero;
-
-use crate::celt::kiss_fft::KissFft;
-use crate::celt::mdct::Mdct;
-
 /// Mode configuration for the default and only mode of Celt.
 pub(crate) struct Mode {
     pub(crate) fs: u32,

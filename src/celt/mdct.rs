@@ -1,11 +1,9 @@
 //! Implements the modified discrete cosine transform.
 
-use std::ops::Sub;
-
 use num_complex::Complex32;
 use num_traits::Zero;
 
-use crate::celt::kiss_fft::{KissFft, FFT_CONFIGURATION};
+use crate::celt::FFT_CONFIGURATION;
 
 /// This is a simple MDCT implementation that uses a N/4 complex FFT
 /// to do most of the work. It should be relatively straightforward to
@@ -20,9 +18,9 @@ use crate::celt::kiss_fft::{KissFft, FFT_CONFIGURATION};
 /// and scaling in many places.
 pub(crate) struct Mdct {
     /// Float scratch pad.
-    pub(crate) spf: Vec<f32>,
+    spf: Vec<f32>,
     /// Complex scratch pad.
-    pub(crate) spc: Vec<Complex32>,
+    spc: Vec<Complex32>,
 }
 
 const N: usize = 1920;
@@ -190,8 +188,8 @@ impl Mdct {
             let mut ip1 = stride * (n2 - 1);
 
             fft.bitrev.iter().enumerate().for_each(|(i, rev)| {
-                let re = ((input[ip1] * TRIG[trigp + i]) + (input[ip0] * TRIG[trigp + n4 + i]));
-                let im = ((input[ip0] * TRIG[trigp + i]) - (input[ip1] * TRIG[trigp + n4 + i]));
+                let re = (input[ip1] * TRIG[trigp + i]) + (input[ip0] * TRIG[trigp + n4 + i]);
+                let im = (input[ip0] * TRIG[trigp + i]) - (input[ip1] * TRIG[trigp + n4 + i]);
 
                 // We swap real and imag because we use an FFT instead of an IFFT.
                 self.spc[*rev].re = im;
@@ -638,8 +636,6 @@ mod tests {
 
     use nanorand::RNG;
 
-    use crate::celt;
-
     use super::*;
 
     fn check(input: &[f32], output: &[f32], nfft: usize) {
@@ -686,7 +682,7 @@ mod tests {
                 let phase: f64 =
                     2.0 * PI * (i as f64 + 0.50 + 0.25 * nfft as f64) * (k as f64 + 0.5)
                         / nfft as f64;
-                let mut re = phase.cos();
+                let re = phase.cos();
 
                 ansr += input[k] as f64 * re;
             });
@@ -720,7 +716,7 @@ mod tests {
 
         let mut input = vec![0_f32; nfft];
         let mut output = vec![0_f32; nfft];
-        let mut window = vec![1.0_f32; nfft / 2];
+        let window = vec![1.0_f32; nfft / 2];
 
         input.iter_mut().for_each(|x| {
             *x = (rng.generate_range::<u32>(0, 32768) as i16 - 16384) as f32;
@@ -751,7 +747,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dft() {
+    fn test_mdct() {
         test1d(240, false);
         test1d(240, true);
         test1d(480, false);

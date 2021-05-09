@@ -1,8 +1,5 @@
 //! Implements the FFT used for the MDCT.
 
-use std::cmp::max;
-use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
-
 use num_complex::Complex32;
 use num_traits::Zero;
 
@@ -136,11 +133,13 @@ impl KissFft {
             // Degenerate case where all the twiddles are 1.
             (0..n).into_iter().for_each(|i| {
                 let scratch0 = data[offset] - data[offset + 2];
+                let scratch1 = data[offset + 1] + data[offset + 3];
+
                 data[offset] += data[offset + 2];
-                let mut scratch1 = data[offset + 1] + data[offset + 3];
                 data[offset + 2] = data[offset] - scratch1;
                 data[offset] += scratch1;
-                scratch1 = data[offset + 1] - data[offset + 3];
+
+                let scratch1 = data[offset + 1] - data[offset + 3];
 
                 data[offset + 1].re = scratch0.re + scratch1.im;
                 data[offset + 1].im = scratch0.im - scratch1.re;
@@ -153,9 +152,9 @@ impl KissFft {
             // m is guaranteed to be a multiple of 4.
             debug_assert!(m % 4 == 0);
 
-            let mut scratch = [Complex32::zero(); 6];
             let m2 = 2 * m;
             let m3 = 3 * m;
+            let mut scratch = [Complex32::zero(); 6];
 
             (0..n).into_iter().for_each(|i| {
                 let mut offset = i * mm;
@@ -221,7 +220,7 @@ impl KissFft {
                 scratch[5].re = scratch[0].re + (scratch[7].re * ya.re + scratch[8].re * yb.re);
                 scratch[5].im = scratch[0].im + (scratch[7].im * ya.re + scratch[8].im * yb.re);
 
-                scratch[6].re = (scratch[10].im * ya.im + scratch[9].im * yb.im);
+                scratch[6].re = scratch[10].im * ya.im + scratch[9].im * yb.im;
                 scratch[6].im = -(scratch[10].re * ya.im + scratch[9].re * yb.im);
 
                 data[offset1] = scratch[5] - scratch[6];
@@ -590,9 +589,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use nanorand::RNG;
-
-    use crate::celt;
-    use crate::celt::Mdct;
 
     use super::*;
 

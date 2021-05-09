@@ -4,7 +4,6 @@ use crate::math::Log;
 use crate::range_coder::{
     Tell, CODE_BITS, CODE_BOT, CODE_EXTRA, CODE_TOP, SYM_BITS, SYM_MAX, UINT_BITS, WINDOW_SIZE,
 };
-use crate::DecoderError;
 
 /// The range decoder.
 ///
