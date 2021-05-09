@@ -1,8 +1,12 @@
 //! Implements the range encoder.
+use std::convert::TryFrom;
+use std::ops::Neg;
+
 use crate::encoder_error::EncoderError;
 use crate::math::Log;
 use crate::range_coder::{
-    Tell, CODE_BITS, CODE_BOT, CODE_SHIFT, CODE_TOP, SYM_BITS, SYM_MAX, UINT_BITS, WINDOW_SIZE,
+    get_lapace_freq, Tell, CODE_BITS, CODE_BOT, CODE_SHIFT, CODE_TOP, SYM_BITS, SYM_MAX, UINT_BITS,
+    WINDOW_SIZE,
 };
 
 /// The range encoder.
@@ -430,5 +434,57 @@ impl<'e> RangeEncoder<'e> {
         }
 
         Ok(())
+    }
+
+    /// Encode a value that is assumed to be the realisation of a
+    /// Laplace-distributed random process.
+    ///
+    /// Returns the decoded value.
+    ///
+    /// # Arguments:
+    /// * `value` - The value to encode.
+    /// * `fs`    - Probability of 0, multiplied by 32768.
+    /// * `decay` - Probability of the value +/- 1, multiplied by 16384
+    ///
+    pub(crate) fn encode_laplace(&mut self, value: &mut i32, fs: u32, decay: u32) {
+        let mut fs = fs;
+        let mut val = *value;
+        let mut fl = 0;
+
+        if val != 0 {
+            let s: i32 = if val.is_negative() { -1 } else { 0 };
+            val = (val + s) ^ s;
+
+            fl = fs;
+            fs = get_lapace_freq(fs, decay);
+
+            // Search the decaying part of the PDF.
+            let mut i = 1;
+            while fs > 0 && i < val {
+                fs *= 2;
+                fl += fs + 2;
+                fs = (fs * decay) >> 15;
+
+                i += 1;
+            }
+
+            // Everything beyond that has a probability of 1.
+            if fs == 0 {
+                let mut ndi_max = (32768 - fl) as i32;
+                ndi_max = (ndi_max - s) >> 1;
+                let di = i32::min(val - i, ndi_max - 1);
+                fl += (2 * di + 1 + s) as u32;
+                fs = u32::min(1, (32768 - fl) as u32);
+                *value = (i + di + s) as i32 ^ s;
+            } else {
+                fs += 1;
+                fl += (fs as i32 & !s) as u32;
+            }
+
+            debug_assert!(fl + fs <= 32768);
+            debug_assert!(fs > 0);
+            debug_assert!(fl > 0);
+        }
+        self.encode_bin(fl, (fl + fs) as u32, 15);
     }
 }

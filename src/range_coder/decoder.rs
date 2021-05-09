@@ -2,7 +2,8 @@
 
 use crate::math::Log;
 use crate::range_coder::{
-    Tell, CODE_BITS, CODE_BOT, CODE_EXTRA, CODE_TOP, SYM_BITS, SYM_MAX, UINT_BITS, WINDOW_SIZE,
+    get_lapace_freq, Tell, CODE_BITS, CODE_BOT, CODE_EXTRA, CODE_TOP, SYM_BITS, SYM_MAX, UINT_BITS,
+    WINDOW_SIZE,
 };
 
 /// The range decoder.
@@ -330,5 +331,57 @@ impl<'d> RangeDecoder<'d> {
         self.end_bits = available;
         self.bits_total += bits;
         ret
+    }
+
+    /// Decode a value that is assumed to be the realisation of a
+    /// Laplace-distributed random process
+    ///
+    /// Returns the decoded value.
+    ///
+    /// # Arguments:
+    /// * `fs`    - Probability of 0, multiplied by 32768.
+    /// * `decay` - Probability of the value +/- 1, multiplied by 16384.
+    ///
+    pub(crate) fn decode_laplace(&mut self, fs: u32, decay: u32) -> i32 {
+        let mut val: i32 = 0;
+        let fm = self.decode_bin(15);
+        let mut fl = 0;
+        let mut fs = fs;
+
+        if fm >= fs {
+            val += 1;
+            fl = fs;
+            fs = get_lapace_freq(fs, decay) + 1;
+
+            // Search the decaying part of the PDF.
+            while fs != 0 && fm >= fl + 2 * fs {
+                fs *= 2;
+                fl += fs;
+                fs = ((fs - 2) * decay) >> 15;
+                fs += 1;
+                val += 1;
+            }
+
+            // Everything beyond that has a probability of 1
+            if fs <= 1 {
+                let di = (fm - fl) >> 1;
+                val += di as i32;
+                fl += 2 * di;
+            }
+
+            if fm < fl + fs {
+                val = -val;
+            } else {
+                fl += fs;
+            }
+        }
+
+        debug_assert!(fl < 32768);
+        debug_assert_ne!(fs, 0);
+        debug_assert!(fl <= fm);
+        debug_assert!(fm < u32::min(fl + fs, 32768));
+
+        self.update(fl, u32::min(fl + fs, 32768), 32768);
+        val
     }
 }

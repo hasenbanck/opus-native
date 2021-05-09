@@ -77,6 +77,11 @@ pub(crate) trait Tell {
     }
 }
 
+fn get_lapace_freq(fs0: u32, decay: u32) -> u32 {
+    let ft = 32768 - 32 - fs0;
+    (ft * (16384 - decay)) >> 15
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::panic)]
@@ -486,5 +491,46 @@ mod tests {
         enc.encode_uint(4, 255).unwrap();
         enc.done().unwrap();
         enc.shrink(5);
+    }
+
+    fn get_start_freq(decay: u32) -> u32 {
+        let ft = 32768 - 33;
+        let fs = (ft * (16384 - decay)) / (16384 + decay);
+        fs + 1
+    }
+
+    #[test]
+    fn test_laplace() {
+        let mut rng = nanorand::WyRand::new_seed(42);
+        let mut val = vec![0_i32; 10000];
+        let mut decay = vec![0_u32; 10000];
+        let mut buffer = vec![0_u8; 40000];
+        val[0] = 3;
+        val[1] = 0;
+        val[2] = -1;
+        decay[0] = 6000;
+        decay[1] = 5800;
+        decay[2] = 5600;
+
+        let mut enc = RangeEncoder::new(&mut buffer);
+
+        (3..10000).into_iter().for_each(|i| {
+            val[i] = rng.generate_range::<u32>(0, 16) as i32 - 7;
+            decay[i] = rng.generate_range::<u32>(5000, 16000);
+        });
+
+        (0..10000).into_iter().for_each(|i| {
+            enc.encode_laplace(&mut val[i], get_start_freq(decay[i]), decay[i]);
+        });
+
+        enc.done().unwrap();
+        drop(enc);
+
+        let mut dec = RangeDecoder::new(&buffer);
+
+        (0..10000).into_iter().for_each(|i| {
+            let d = dec.decode_laplace(get_start_freq(decay[i]), decay[i]);
+            assert_eq!(d, val[i], "Got {} instead of {}", d, val[i]);
+        });
     }
 }
