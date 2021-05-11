@@ -10,10 +10,6 @@ use crate::range_coder::{
 };
 
 /// The range encoder.
-///
-/// See the `RangeDecoder` documentation and RFC 6716 for implementation details.
-///
-/// [RFC6716](https://tools.ietf.org/html/rfc6716)
 pub(crate) struct RangeEncoder<'e> {
     /// Buffered output.
     buffer: &'e mut [u8],

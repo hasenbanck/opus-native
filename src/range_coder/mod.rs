@@ -1,14 +1,48 @@
 //! Implements the range coder.
-#[cfg(feature = "decoder")]
+//!
+//! This is an entropy coder based upon [Mar79], which is itself a
+//! rediscovery of the FIFO arithmetic code introduced by [Pas76].
+//!
+//! It is very similar to arithmetic encoding, except that encoding is done with
+//! digits in any base, instead of with bits, and so it is faster when using
+//! larger bases (i.e.: a byte).
+//!
+//! The author claims an average waste of `1/2*log_b(2b)` bits, where `b`
+//! is the base, longer than the theoretical optimum, but to my knowledge there
+//! is no published justification for this claim.
+//!
+//! This only seems true when using near-infinite precision arithmetic so that
+//! the process is carried out with no rounding errors.
+//!
+//! An excellent description of implementation details is available at
+//! http://www.arturocampos.com/ac_range.html
+//!
+//! A recent work [MNW98] which proposes several changes to arithmetic
+//! encoding for efficiency actually re-discovers many of the principles
+//! behind range encoding, and presents a good theoretical analysis of them.
+//!
+//! End of stream is handled by writing out the smallest number of bits that
+//! ensures that the stream will be correctly decoded regardless of the value of
+//! any subsequent bits.
+//!
+//! tell() can be used to determine how many bits were needed to decode
+//! all the symbols thus far; other data can be packed in the remaining bits of
+//! the input buffer.
+//!
+//! * Pas76: "Source coding algorithms for fast data compression"
+//!          by Richard Clark Pasco (1976).
+//!
+//! * Mar79: "Range encoding: an algorithm for removing redundancy from a digitised message"
+//!          by Martin, G.N.N. (1979)
+//!
+//! * MNW98: "Arithmetic Coding Revisited"
+//!          by Alistair Moffat and Radford Neal and Ian H. Witten (1998).
 pub(crate) use decoder::RangeDecoder;
-#[cfg(feature = "encoder")]
 pub(crate) use encoder::RangeEncoder;
 
 use crate::math::Log;
 
-#[cfg(feature = "decoder")]
 mod decoder;
-#[cfg(feature = "encoder")]
 mod encoder;
 
 /// The number of bits to use for the range-coded part of unsigned integers.

@@ -129,7 +129,7 @@ impl Mdct {
                 tmp.re = (re * t0) - (im * t1);
                 tmp.im = (im * t0) + (re * t1);
                 tmp *= fft.scale;
-                self.spc[fft.bitrev[i]] = tmp;
+                self.spc[usize::from(fft.bitrev[i])] = tmp;
 
                 sp += 2;
             });
@@ -192,8 +192,8 @@ impl Mdct {
                 let im = (input[ip0] * TRIG[trigp + i]) - (input[ip1] * TRIG[trigp + n4 + i]);
 
                 // We swap real and imag because we use an FFT instead of an IFFT.
-                self.spc[*rev].re = im;
-                self.spc[*rev].im = re;
+                self.spc[usize::from(*rev)].re = im;
+                self.spc[usize::from(*rev)].im = re;
 
                 // Storing the pre-rotation directly in the bitrev order.
                 ip0 += 2 * stride;

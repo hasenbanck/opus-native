@@ -25,23 +25,15 @@
 //! * Frame sizes from 2.5 ms to 60 ms
 //! * Good loss robustness and packet loss concealment (PLC)
 //!
-#[cfg(feature = "decoder")]
 pub use decoder::*;
-#[cfg(feature = "decoder")]
 pub use decoder_error::*;
-#[cfg(feature = "encoder")]
 pub use encoder::*;
-#[cfg(feature = "encoder")]
 pub use encoder::*;
 
 pub(crate) mod celt;
-#[cfg(feature = "decoder")]
 mod decoder;
-#[cfg(feature = "decoder")]
 mod decoder_error;
-#[cfg(feature = "encoder")]
 mod encoder;
-#[cfg(feature = "encoder")]
 mod encoder_error;
 pub(crate) mod math;
 #[cfg(feature = "ogg")]
@@ -49,21 +41,22 @@ mod ogg;
 pub(crate) mod range_coder;
 pub(crate) mod silk;
 
+// Affects the following targets: avr and msp430
+#[cfg(any(target_pointer_width = "8", target_pointer_width = "16"))]
+compile_error!("usize needs to be at least 32 bit wide");
+
 /// Allows applications to use their own sample format.
 pub trait Sample {
-    #[cfg(feature = "decoder")]
     /// Converts the given float into the custom sample.
     fn from_f32(float: f32) -> Self;
 }
 
-#[cfg(feature = "decoder")]
 impl Sample for f32 {
     fn from_f32(float: f32) -> Self {
         float
     }
 }
 
-#[cfg(feature = "decoder")]
 impl Sample for i16 {
     fn from_f32(float: f32) -> Self {
         let float = float * 32768.0;

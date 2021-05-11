@@ -14,7 +14,7 @@ pub(crate) struct KissFft {
     pub(crate) scale: f32,
     pub(crate) shift: usize,
     pub(crate) factors: [usize; 2 * MAX_FACTORS],
-    pub(crate) bitrev: &'static [usize],
+    pub(crate) bitrev: &'static [u16],
     pub(crate) twiddles: &'static [Complex32],
 }
 
@@ -280,7 +280,7 @@ pub(crate) const FFT_CONFIGURATION: &[KissFft; 4] = &[
     },
 ];
 
-const BITREV_480: &[usize] = &[
+const BITREV_480: &[u16] = &[
     0, 96, 192, 288, 384, 32, 128, 224, 320, 416, 64, 160, 256, 352, 448, 8, 104, 200, 296, 392,
     40, 136, 232, 328, 424, 72, 168, 264, 360, 456, 16, 112, 208, 304, 400, 48, 144, 240, 336, 432,
     80, 176, 272, 368, 464, 24, 120, 216, 312, 408, 56, 152, 248, 344, 440, 88, 184, 280, 376, 472,
@@ -307,7 +307,7 @@ const BITREV_480: &[usize] = &[
     87, 183, 279, 375, 471, 31, 127, 223, 319, 415, 63, 159, 255, 351, 447, 95, 191, 287, 383, 479,
 ];
 
-const BITREV_240: &[usize] = &[
+const BITREV_240: &[u16] = &[
     0, 48, 96, 144, 192, 16, 64, 112, 160, 208, 32, 80, 128, 176, 224, 4, 52, 100, 148, 196, 20,
     68, 116, 164, 212, 36, 84, 132, 180, 228, 8, 56, 104, 152, 200, 24, 72, 120, 168, 216, 40, 88,
     136, 184, 232, 12, 60, 108, 156, 204, 28, 76, 124, 172, 220, 44, 92, 140, 188, 236, 1, 49, 97,
@@ -322,7 +322,7 @@ const BITREV_240: &[usize] = &[
     207, 31, 79, 127, 175, 223, 47, 95, 143, 191, 239,
 ];
 
-const BITREV_120: &[usize] = &[
+const BITREV_120: &[u16] = &[
     0, 24, 48, 72, 96, 8, 32, 56, 80, 104, 16, 40, 64, 88, 112, 4, 28, 52, 76, 100, 12, 36, 60, 84,
     108, 20, 44, 68, 92, 116, 1, 25, 49, 73, 97, 9, 33, 57, 81, 105, 17, 41, 65, 89, 113, 5, 29,
     53, 77, 101, 13, 37, 61, 85, 109, 21, 45, 69, 93, 117, 2, 26, 50, 74, 98, 10, 34, 58, 82, 106,
@@ -331,7 +331,7 @@ const BITREV_120: &[usize] = &[
     47, 71, 95, 119,
 ];
 
-const BITREV_60: &[usize] = &[
+const BITREV_60: &[u16] = &[
     0, 12, 24, 36, 48, 4, 16, 28, 40, 52, 8, 20, 32, 44, 56, 1, 13, 25, 37, 49, 5, 17, 29, 41, 53,
     9, 21, 33, 45, 57, 2, 14, 26, 38, 50, 6, 18, 30, 42, 54, 10, 22, 34, 46, 58, 3, 15, 27, 39, 51,
     7, 19, 31, 43, 55, 11, 23, 35, 47, 59,
@@ -596,7 +596,7 @@ mod tests {
     fn forward(fft: &KissFft, input: &[Complex32], output: &mut [Complex32]) {
         // Bit-reverse and scale the input.
         (0..fft.nfft).into_iter().for_each(|i| {
-            output[fft.bitrev[i]] = input[i] * fft.scale;
+            output[usize::from(fft.bitrev[i])] = input[i] * fft.scale;
         });
 
         fft.process(output);
@@ -606,7 +606,7 @@ mod tests {
     fn inverse(fft: &KissFft, input: &[Complex32], output: &mut [Complex32]) {
         // Bit-reverse the input.
         (0..fft.nfft).into_iter().for_each(|i| {
-            output[fft.bitrev[i]] = input[i];
+            output[usize::from(fft.bitrev[i])] = input[i];
         });
 
         (0..fft.nfft).into_iter().for_each(|i| {
