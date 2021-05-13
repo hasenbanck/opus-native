@@ -35,3 +35,4 @@ jobs:
       - name: Run tests
         run: |
           cargo test --verbose --all
+          cargo clippy --all-features -- -D warnings
