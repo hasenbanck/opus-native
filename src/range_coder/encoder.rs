@@ -1,7 +1,4 @@
 //! Implements the range encoder.
-use std::convert::TryFrom;
-use std::ops::Neg;
-
 use crate::encoder_error::EncoderError;
 use crate::math::Log;
 use crate::range_coder::{
@@ -442,7 +439,12 @@ impl<'e> RangeEncoder<'e> {
     /// * `fs`    - Probability of 0, multiplied by 32768.
     /// * `decay` - Probability of the value +/- 1, multiplied by 16384
     ///
-    pub(crate) fn encode_laplace(&mut self, value: &mut i32, fs: u32, decay: u32) {
+    pub(crate) fn encode_laplace(
+        &mut self,
+        value: &mut i32,
+        fs: u32,
+        decay: u32,
+    ) -> Result<(), EncoderError> {
         let mut fs = fs;
         let mut val = *value;
         let mut fl = 0;
@@ -481,6 +483,6 @@ impl<'e> RangeEncoder<'e> {
             debug_assert!(fs > 0);
             debug_assert!(fl > 0);
         }
-        self.encode_bin(fl, (fl + fs) as u32, 15);
+        self.encode_bin(fl, (fl + fs) as u32, 15)
     }
 }

@@ -25,8 +25,6 @@
 //! * Frame sizes from 2.5 ms to 60 ms
 //! * Good loss robustness and packet loss concealment (PLC)
 //!
-use std::convert::TryFrom;
-
 pub use decoder::*;
 pub use decoder_error::*;
 pub use encoder::*;
@@ -293,11 +291,11 @@ pub fn parse_packet(
 ) -> Result<usize, DecoderError> {
     let framesize = query_packet_samples_per_frame(packet, SamplingRate::Hz48000);
     let mut offset = 1;
-    let mut len = packet.len();
-    let mut last_size = packet.len() - offset;
-    let mut count: usize = 0;
+    let mut len = packet.len() - offset;
+    let mut last_size = len;
     let mut cbr = false;
     let mut pad = 0;
+    let mut count: usize;
 
     match packet[0] & 0x3 {
         0 => {
@@ -449,6 +447,122 @@ fn parse_size(data: &[u8], mut size: &mut usize) -> Result<usize, DecoderError> 
     }
 }
 
+/// Applies soft-clipping to bring a float signal within the [-1,1] range. If
+/// the signal is already in that range, nothing is done. If there are values
+/// outside of [-1,1], then the signal is clipped as smoothly as possible to
+/// both fit in the range and avoid creating excessive distortion in the
+/// process.
+///
+/// # Arguments
+/// * `pcm`          - Input PCM and modified PCM.
+/// * `channels`     - Number of channels.
+/// * `softclip_mem` - State memory for the soft clipping process
+///                    (one float per channel, initialized to zero).
+///
+pub fn pcm_soft_clip(pcm: &mut [f32], channels: usize, softclip_mem: &mut [f32]) {
+    if pcm.is_empty() || channels == 0 || softclip_mem.len() < channels {
+        return;
+    }
+    let frame_size = pcm.len() / channels;
+
+    // First thing: saturate everything to +/- 2 which is the highest level our
+    // non-linearity can handle. At the point where the signal reaches +/-2,
+    // the derivative will be zero anyway, so this doesn't introduce any
+    // discontinuity in the derivative.
+    pcm.iter_mut().for_each(|x| *x = x.max(-2.0).min(2.0));
+
+    (0..channels).into_iter().for_each(|c| {
+        let mut offset = c;
+        let mut a = softclip_mem[c];
+
+        // Continue applying the non-linearity from the previous frame to avoid
+        // any discontinuity.
+        for i in 0..frame_size {
+            if pcm[offset + i * channels] * a >= 0.0 {
+                break;
+            }
+            pcm[offset + i * channels] = pcm[offset + i * channels]
+                + a * pcm[offset + i * channels] * pcm[offset + i * channels];
+        }
+
+        let mut curr = 0;
+        let pcm_start_value = pcm[offset];
+
+        loop {
+            let mut pos = 0;
+            for i in curr..frame_size {
+                pos = i;
+                if pcm[offset + pos * channels] > 1.0 || pcm[offset + pos * channels] < -1.0 {
+                    break;
+                }
+            }
+
+            if pos == frame_size {
+                a = 0.0;
+                break;
+            }
+
+            let mut peak_pos = pos;
+            let mut start = pos;
+            let mut end = pos;
+            let mut maxval = (pcm[offset + pos * channels]).abs();
+
+            // Look for first zero crossing before clipping.
+            while start > 0
+                && pcm[offset + pos * channels] * pcm[offset + (start - 1) * channels] >= 0.0
+            {
+                start -= 1;
+            }
+
+            // Look for first zero crossing after clipping.
+            while end < frame_size
+                && pcm[offset + pos * channels] * pcm[offset + end * channels] >= 0.0
+            {
+                // Look for other peaks until the next zero-crossing.
+                if (pcm[offset + end * channels]).abs() > maxval {
+                    maxval = (pcm[offset + end * channels]).abs();
+                    peak_pos = end;
+                }
+                end += 1;
+            }
+
+            // Detect the special case where we clip before the first zero crossing.
+            let special = start == 0 && pcm[offset + pos * channels] * pcm[offset] >= 0.0;
+
+            // Compute a such that maxval + a * maxval^2 = 1
+            let mut a = (maxval - 1.0) / (maxval * maxval);
+
+            if pcm[offset + pos * channels] > 0.0 {
+                a = -a;
+            }
+
+            // Apply soft clipping.
+            (start..end).into_iter().for_each(|i| {
+                pcm[offset + i * channels] = pcm[offset + i * channels]
+                    + a * pcm[offset + i * channels] * pcm[offset + i * channels];
+            });
+
+            if special && peak_pos >= 2 {
+                // Add a linear ramp from the first sample to the signal peak.
+                // This avoids a discontinuity at the beginning of the frame.
+                let mut diff = pcm_start_value - pcm[offset];
+                let step = diff / peak_pos as f32;
+                (curr..peak_pos).into_iter().for_each(|i| {
+                    diff -= step;
+                    pcm[offset + i * channels] += diff;
+                    pcm[offset + i * channels] = pcm[offset + i * channels].max(-1.0).min(1.0);
+                });
+            }
+            curr = end;
+            if curr == frame_size {
+                break;
+            }
+        }
+
+        softclip_mem[c] = a;
+    });
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::panic)]
@@ -463,7 +577,7 @@ mod tests {
         0x81, 0xDA, 0x84, 0xE8, 0x87, 0x77, 0x83, 0xD6, 0x48, 0xB3, 0x6B,
     ];
     const TEST_PACKET_VBR: &[u8] = &[
-        0x82, 0xDA, 0x84, 0xE8, 0x87, 0x77, 0x83, 0xD6, 0x48, 0xB3, 0x6B, 0x45,
+        0x82, 0x4, 0xDA, 0x84, 0xE8, 0x87, 0x77, 0x83, 0xD6, 0x48, 0xB3, 0x6B,
     ];
     const TEST_PACKET_INVALID: &[u8] = &[0x81, 0xDA];
 
@@ -609,6 +723,7 @@ mod tests {
         assert_eq!(packet_offset, 12);
     }
 
+    #[test]
     fn test_parse_packet_with_two_cbr_frames() {
         let mut frames = [0; 48];
         let mut sizes = [0; 48];
@@ -634,6 +749,7 @@ mod tests {
         assert_eq!(packet_offset, 11);
     }
 
+    #[test]
     fn test_parse_packet_with_two_vbr_frames() {
         let mut frames = [0; 48];
         let mut sizes = [0; 48];
@@ -641,7 +757,7 @@ mod tests {
         let mut packet_offset = 0;
 
         let count = parse_packet(
-            TEST_PACKET_CBR,
+            TEST_PACKET_VBR,
             false,
             &mut frames,
             &mut sizes,
@@ -651,14 +767,15 @@ mod tests {
         .unwrap();
 
         assert_eq!(count, 2);
-        assert_eq!(frames[0], 1);
-        assert_eq!(sizes[0], 5);
+        assert_eq!(frames[0], 2);
+        assert_eq!(sizes[0], 4);
         assert_eq!(frames[1], 6);
         assert_eq!(sizes[1], 6);
-        assert_eq!(payload_offset, 1);
+        assert_eq!(payload_offset, 2);
         assert_eq!(packet_offset, 12);
     }
 
+    #[test]
     fn test_parse_packet_invalid_frame() {
         let mut frames = [0; 48];
         let mut sizes = [0; 48];
@@ -672,5 +789,33 @@ mod tests {
             None,
         )
         .is_err())
+    }
+
+    #[test]
+    fn test_pcm_soft_clip() {
+        let mut x = [0_f32; 1024];
+        let mut s = [0_f32; 8];
+
+        (0..1024).into_iter().for_each(|i| {
+            (0..1024).into_iter().for_each(|j| {
+                x[j] = (j & 0xFF) as f32 * (1.0 / 32.0) - 4.0;
+            });
+            pcm_soft_clip(&mut x[i..], 1, &mut s);
+            (i..1024).into_iter().for_each(|j| {
+                assert!(x[j] <= 1.0);
+                assert!(x[j] >= -1.0);
+            });
+        });
+
+        (1..9).into_iter().for_each(|i| {
+            (0..1024).into_iter().for_each(|j| {
+                x[j] = (j & 0xFF) as f32 * (1.0 / 32.0) - 4.0;
+            });
+            pcm_soft_clip(&mut x, i, &mut s);
+            (0..(1024 / i) * i).into_iter().for_each(|j| {
+                assert!(x[j] <= 1.0);
+                assert!(x[j] >= -1.0);
+            });
+        });
     }
 }

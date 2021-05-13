@@ -554,7 +554,8 @@ mod tests {
         });
 
         (0..10000).into_iter().for_each(|i| {
-            enc.encode_laplace(&mut val[i], get_start_freq(decay[i]), decay[i]);
+            enc.encode_laplace(&mut val[i], get_start_freq(decay[i]), decay[i])
+                .unwrap();
         });
 
         enc.done().unwrap();

@@ -24,8 +24,6 @@ impl KissFft {
         let mut strides = [0_usize; MAX_FACTORS];
         strides[0] = 1;
 
-        let shift = self.shift;
-
         let mut m = 0;
         let mut l = 0;
         while m != 1 {
@@ -61,7 +59,7 @@ impl KissFft {
         let mut offset2 = 0;
         let tw = std::f32::consts::FRAC_1_SQRT_2;
 
-        (0..n).into_iter().for_each(|i| {
+        (0..n).into_iter().for_each(|_| {
             offset2 = offset + 4;
 
             let mut t = data[offset2];
@@ -100,7 +98,7 @@ impl KissFft {
             let mut tw1_offset = 0;
             let mut tw2_offset = 0;
 
-            (1..m + 1).into_iter().rev().for_each(|k| {
+            (1..m + 1).into_iter().rev().for_each(|_| {
                 scratch[1] = data[offset + m] * self.twiddles[tw1_offset];
                 scratch[2] = data[offset + m2] * self.twiddles[tw2_offset];
 
@@ -131,7 +129,7 @@ impl KissFft {
             let mut offset = 0;
 
             // Degenerate case where all the twiddles are 1.
-            (0..n).into_iter().for_each(|i| {
+            (0..n).into_iter().for_each(|_| {
                 let scratch0 = data[offset] - data[offset + 2];
                 let scratch1 = data[offset + 1] + data[offset + 3];
 
@@ -162,7 +160,7 @@ impl KissFft {
                 let mut tw2_offset = 0;
                 let mut tw3_offset = 0;
 
-                (0..m).into_iter().for_each(|j| {
+                (0..m).into_iter().for_each(|_| {
                     scratch[0] = data[offset + m] * self.twiddles[tw1_offset];
                     scratch[1] = data[offset + m2] * self.twiddles[tw2_offset];
                     scratch[2] = data[offset + m3] * self.twiddles[tw3_offset];

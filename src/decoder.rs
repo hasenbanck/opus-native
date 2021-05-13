@@ -55,6 +55,7 @@ pub struct Decoder {
     frame_size: usize,
     prev_redundancy: Option<usize>,
     last_packet_duration: Option<u32>,
+    softclip_mem: [f32; 2],
 
     final_range: u32,
 }
@@ -78,7 +79,7 @@ impl Decoder {
             frame_size: configuration.sampling_rate as usize / 400,
             prev_redundancy: None,
             last_packet_duration: None,
-
+            softclip_mem: [0f32; 2],
             final_range: 0,
         })
     }
@@ -99,6 +100,7 @@ impl Decoder {
         self.frame_size = self.sampling_rate as usize / 400;
         self.prev_redundancy = None;
         self.last_packet_duration = None;
+        self.softclip_mem = [0f32; 2];
 
         Ok(())
     }

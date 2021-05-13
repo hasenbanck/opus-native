@@ -278,7 +278,6 @@ fn cwrsi(y: &mut [i32], mut n: u32, mut k: u32, mut i: u32) -> f32 {
     s = -(i as i32);
     val = (k as i32 + s) ^ s;
     y[yp] = val;
-    yp += 1;
     yy += (val * val) as f32;
 
     yy

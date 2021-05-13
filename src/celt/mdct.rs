@@ -47,7 +47,7 @@ impl Mdct {
     ) {
         let mut n = N;
         let mut trigp = 0;
-        (0..shift).into_iter().for_each(|x| {
+        (0..shift).into_iter().for_each(|_| {
             n >>= 1;
             trigp += n;
         });
@@ -74,7 +74,7 @@ impl Mdct {
             let mut wp1 = wp0 - 1;
 
             // Real part arranged as -d-cR, Imag part arranged as -b+aR.
-            (0..overlap_offset).into_iter().for_each(|i| {
+            (0..overlap_offset).into_iter().for_each(|_| {
                 self.spf[sp] = (window[wp1] * input[ip0 + n2]) + (window[wp0] * input[ip1]);
                 self.spf[sp + 1] = (window[wp0] * input[ip0]) - (window[wp1] * input[ip1 - n2]);
 
@@ -91,7 +91,7 @@ impl Mdct {
             // Real part arranged as a-bR, Imag part arranged as -c-dR.
             (overlap_offset..n4 - overlap_offset)
                 .into_iter()
-                .for_each(|i| {
+                .for_each(|_| {
                     self.spf[sp] = input[ip1];
                     self.spf[sp + 1] = input[ip0];
 
@@ -101,7 +101,7 @@ impl Mdct {
                 });
 
             // Real part arranged as a-bR, Imag part arranged as -c-dR.
-            (n4 - overlap_offset..n4).into_iter().for_each(|i| {
+            (n4 - overlap_offset..n4).into_iter().for_each(|_| {
                 self.spf[sp] = -(window[wp0] * input[ip0 - n2]) + (window[wp1] * input[ip1]);
                 self.spf[sp + 1] = (window[wp1] * input[ip0]) + (window[wp0] * input[ip1 + n2]);
 
@@ -169,7 +169,7 @@ impl Mdct {
     ) {
         let mut n = N;
         let mut trigp = 0;
-        (0..shift).into_iter().for_each(|x| {
+        (0..shift).into_iter().for_each(|_| {
             n >>= 1;
             trigp += n;
         });
@@ -246,7 +246,7 @@ impl Mdct {
             let mut wp0 = 0;
             let mut wp1 = overlap - 1;
 
-            (0..overlap / 2).into_iter().for_each(|i| {
+            (0..overlap / 2).into_iter().for_each(|_| {
                 let x0 = output[op1];
                 let x1 = output[op0];
                 output[op0] = (window[wp1] * x1) - (window[wp0] * x0);
