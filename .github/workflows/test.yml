@@ -18,10 +18,6 @@ jobs:
         with:
           components: 'rustfmt, clippy'
       - uses: actions/checkout@master
-      - name: Check Cargo version
-        run: cargo --version
-      - name: Check Rustc version
-        run: rustc --version
       - name: Check format
         run: |
           cargo fmt --all -- --check
@@ -36,10 +32,6 @@ jobs:
     steps:
       - uses: hecrj/setup-rust-action@v1
       - uses: actions/checkout@master
-      - name: Check Cargo version
-        run: cargo --version
-      - name: Check Rustc version
-        run: rustc --version
       - name: Run tests
         run: |
           cargo test --verbose --all
