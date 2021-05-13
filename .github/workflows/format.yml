@@ -11,16 +11,12 @@ env:
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ ubuntu-latest, windows-latest, macOS-latest ]
-        rust: [ stable, nightly ]
+    runs-on: ubuntu-latest
 
     steps:
       - uses: hecrj/setup-rust-action@v1
         with:
-          rust-version: ${{ matrix.rust }}
+          rust-version: stable
           components: 'rustfmt, clippy'
       - uses: actions/checkout@master
       - name: Check Cargo version
@@ -31,6 +27,3 @@ jobs:
         run: |
           cargo fmt --all -- --check
           cargo clippy --all-features -- -D warnings
-      - name: Run tests
-        run: |
-          cargo test --verbose --all
