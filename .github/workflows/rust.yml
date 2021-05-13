@@ -10,15 +10,27 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
-    runs-on: ubuntu-latest
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macOS-latest ]
+        rust: [ stable, nightly ]
 
     steps:
-      - uses: actions/checkout@v2
-      - name: Version
+      - uses: hecrj/setup-rust-action@v1
+        with:
+          rust-version: ${{ matrix.rust }}
+          components: 'rustfmt, clippy'
+      - uses: actions/checkout@master
+      - name: Check Cargo version
+        run: cargo --version
+      - name: Check Rustc version
         run: rustc --version
-      - name: Build
-        run: cargo build --verbose
+      - name: Check format
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-features -- -D warnings
       - name: Run tests
-        run: cargo test --verbose
+        run: |
+          cargo test --verbose --all
