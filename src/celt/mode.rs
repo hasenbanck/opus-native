@@ -1,6 +1,7 @@
 //! Implements the only mode that Celt supports. Custom modes are not supported.
 
 /// Mode configuration for the default and only mode of Celt.
+#[derive(Clone, Debug)]
 pub(crate) struct Mode {
     pub(crate) fs: u32,
     pub(crate) overlap: usize,
@@ -25,6 +26,7 @@ pub(crate) struct Mode {
 }
 
 /// Pulse cache.
+#[derive(Clone, Debug)]
 pub(crate) struct PulseCache {
     pub(crate) size: usize,
     pub(crate) index: &'static [i16],

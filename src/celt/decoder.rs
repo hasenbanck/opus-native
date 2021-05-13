@@ -1,10 +1,12 @@
 //! Implements the Celt decoder.
 
+use crate::celt::Mode;
 use crate::{Channels, DecoderError, SamplingRate};
 
 /// The Celt decoder.
 #[derive(Clone, Debug)]
 pub(crate) struct CeltDecoder {
+    mode: Mode,
     // Signaling is only used for custom decoder mode.
 }
 
@@ -14,8 +16,10 @@ impl CeltDecoder {
         _sampling_rate: SamplingRate,
         _channels: Channels,
     ) -> Result<Self, DecoderError> {
-        // TODO
-        Ok(Self {})
+        let mode = Mode::default();
+        // TODO calculate and set downsample
+
+        Ok(Self { mode })
     }
 
     /// Resets the Celt decoder.

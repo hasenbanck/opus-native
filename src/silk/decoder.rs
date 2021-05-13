@@ -22,7 +22,7 @@ impl SilkDecoder {
         Ok(Self {
             sampling_rate,
             channels,
-            internal_sampling_rate: SamplingRate::_48000Hz,
+            internal_sampling_rate: SamplingRate::Hz48000,
             internal_channels: Channels::Stereo,
         })
     }
