@@ -21,6 +21,19 @@ This crate is under heavy development. Most functionality is not working.
 * Multistream decoder
 * Multistream encoder
 
+## Not supported features
+
+To decrease the implementation complexity, we don't support the following rarely used features:
+
+* Fixed point arithmetic - Only float point arithmetic is supported
+  (only affects cheap MCU without proper floating point support).
+* Custom modes - The Opus specification allows the usage of custom modes (custom sample rates or
+  custom frame sizes) as an optional feature. Since this breaks the compatibility with other
+  programs, leads to worse encoding quality and is extremely rarely used, we decided to not support
+  this optional feature.
+
+If you need these features, you must stick to the reference implementation.
+
 ## Credits
 
 This crate is a direct port of the Opus reference implementation written in C:
