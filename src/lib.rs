@@ -198,25 +198,23 @@ pub fn query_packet_channel_count(packet: &[u8]) -> usize {
 
 /// Returns the number of frames in an Opus packet.
 ///
-/// Returns `None` if the packet has an invalid format.
-///
 /// Packet must have at least a size of 1.
 ///
 /// # Arguments
 /// * `packet` - Input payload.
 ///
-pub fn query_packet_frame_count(packet: &[u8]) -> Option<usize> {
+pub fn query_packet_frame_count(packet: &[u8]) -> Result<usize, DecoderError> {
     debug_assert!(!packet.is_empty());
 
     let count = packet[0] & 0x3;
     if count == 0 {
-        Some(1)
+        Ok(1)
     } else if count != 3 {
-        Some(2)
+        Ok(2)
     } else if packet.len() < 2 {
-        None
+        Err(DecoderError::InvalidPacket)
     } else {
-        Some((packet[1] & 0x3F) as usize)
+        Ok((packet[1] & 0x3F) as usize)
     }
 }
 
@@ -254,16 +252,200 @@ pub fn query_packet_samples_per_frame(packet: &[u8], sampling_rate: SamplingRate
 /// * `packet`        - Input payload.
 /// * `sampling_rate` - Sampling rate.
 ///
-pub fn query_packet_sample_count(packet: &[u8], sampling_rate: SamplingRate) -> Option<usize> {
-    if let Some(count) = query_packet_frame_count(packet) {
-        let samples = count * query_packet_samples_per_frame(packet, sampling_rate);
-        if samples * 25 > sampling_rate as usize * 3 {
-            None
-        } else {
-            Some(samples)
+pub fn query_packet_sample_count(
+    packet: &[u8],
+    sampling_rate: SamplingRate,
+) -> Result<usize, DecoderError> {
+    let count = query_packet_frame_count(packet)?;
+    let samples = count * query_packet_samples_per_frame(packet, sampling_rate);
+    if samples * 25 > sampling_rate as usize * 3 {
+        Err(DecoderError::InvalidPacket)
+    } else {
+        Ok(samples)
+    }
+}
+
+/// Parse an Opus packet into one or more frames.
+///
+/// Returns the number of frames inside the packet.
+///
+/// Opus_decode will perform this operation internally so most applications do not need
+/// to use this function.
+///
+/// This function does not copy the frames, it returns the offsets to the frames inside the packet.
+///
+/// # Arguments
+/// * `packet`         - Opus packet to be parsed.
+/// * `self_delimited` - True if the packet has self delimited framing.
+/// * `frames`         - Returns the encapsulated frame offsets.
+/// * `sizes`          - Returns the sizes of the encapsulated frames.
+/// * `payload_offset` - Returns the position of the payload within the packet (in bytes).
+/// * `packet_offset`  - Returns the position of the next packet (in bytes) in
+///                      multi channel packets.
+///
+pub fn parse_packet(
+    packet: &[u8],
+    self_delimited: bool,
+    frames: &mut [usize; 48],
+    sizes: &mut [usize; 48],
+    payload_offset: Option<&mut usize>,
+    packet_offset: Option<&mut usize>,
+) -> Result<usize, DecoderError> {
+    let framesize = query_packet_samples_per_frame(packet, SamplingRate::Hz48000);
+    let mut offset = 1;
+    let mut len = packet.len();
+    let mut last_size = packet.len() - offset;
+    let mut count: usize = 0;
+    let mut cbr = false;
+    let mut pad = 0;
+
+    match packet[0] & 0x3 {
+        0 => {
+            // One frame.
+            count = 1;
+        }
+        1 => {
+            // Two CBR frames.
+            count = 2;
+            cbr = true;
+
+            if !self_delimited {
+                if len & 0x1 == 1 {
+                    return Err(DecoderError::InvalidPacket);
+                }
+                last_size = len / 2;
+                // If last_size doesn't fit in size[0], we'll catch it later.
+                sizes[0] = last_size;
+            }
+        }
+        2 => {
+            // Two VBR frames.
+            count = 2;
+            let bytes = parse_size(&packet[offset..], &mut sizes[0])?;
+            len -= bytes;
+            if sizes[0] > len {
+                return Err(DecoderError::InvalidPacket);
+            }
+            offset += bytes;
+            last_size = len - sizes[0];
+        }
+        3 => {
+            // Multiple CBR/VBR frames (from 0 to 120 ms).
+            if len < 1 {
+                return Err(DecoderError::InvalidPacket);
+            }
+            // Number of frames encoded in bits 0 to 5.
+            let ch = usize::from(packet[offset]);
+            offset += 1;
+
+            count = ch & 0x3F;
+            if framesize * count > 5760 {
+                return Err(DecoderError::InvalidPacket);
+            }
+            len -= 1;
+
+            // Padding flag is bit 6.
+            if ch & 0x40 != 0x0 {
+                let mut p = 255;
+                while p == 255 {
+                    p = usize::from(packet[offset]);
+                    offset += 1;
+                    len -= 1;
+
+                    let tmp = if p == 255 { 254 } else { p };
+                    len -= tmp;
+                    pad += tmp;
+                }
+            }
+
+            // VBR flag is bit 7.
+            cbr = ch & 0x80 == 0;
+            if !cbr {
+                // VBR case
+                last_size = len;
+                (0..count - 1).into_iter().try_for_each(|i| {
+                    let bytes = parse_size(&packet[offset..], &mut sizes[i])?;
+                    len -= bytes;
+                    if sizes[i] > len {
+                        return Err(DecoderError::InvalidPacket);
+                    }
+                    offset += bytes;
+                    last_size -= bytes + sizes[i];
+
+                    Ok(())
+                })?;
+            } else if !self_delimited {
+                // CBR case.
+                last_size = len / count;
+                if last_size * count != len {
+                    return Err(DecoderError::InvalidPacket);
+                }
+                (0..count - 1).into_iter().for_each(|i| {
+                    sizes[i] = last_size;
+                });
+            }
+        }
+        _ => {
+            unreachable!()
+        }
+    }
+
+    // Self-delimited framing has an extra size for the last frame.
+    if self_delimited {
+        let bytes = parse_size(&packet[offset..], &mut sizes[count - 1])?;
+        len -= bytes;
+        if sizes[count - 1] > len {
+            return Err(DecoderError::InvalidPacket);
+        }
+        offset += bytes;
+        // For CBR packets, apply the size to all the frames.
+        if cbr {
+            if sizes[count - 1] * count > len {
+                return Err(DecoderError::InvalidPacket);
+            }
+            (0..count - 1).into_iter().for_each(|i| {
+                sizes[i] = sizes[count - 1];
+            });
+        } else if bytes + sizes[count - 1] > last_size {
+            return Err(DecoderError::InvalidPacket);
         }
     } else {
-        None
+        // Because it's not encoded explicitly, it's possible the size of the
+        // last packet (or all the packets, for the CBR case) is larger than
+        // 1275. Reject them here.
+        if last_size > 1275 {
+            return Err(DecoderError::InvalidPacket);
+        }
+        sizes[count - 1] = last_size;
+    }
+
+    if let Some(payload_offset) = payload_offset {
+        *payload_offset = offset;
+    }
+
+    (0..count).into_iter().for_each(|i| {
+        frames[i] = offset;
+        offset += sizes[i];
+    });
+
+    if let Some(packet_offset) = packet_offset {
+        *packet_offset = pad + offset;
+    }
+
+    Ok(count)
+}
+
+fn parse_size(data: &[u8], mut size: &mut usize) -> Result<usize, DecoderError> {
+    if data.is_empty() {
+        Err(DecoderError::InvalidPacket)
+    } else if data[0] < 252 {
+        *size = data[0] as usize;
+        Ok(1)
+    } else if data.len() < 2 {
+        Err(DecoderError::InvalidPacket)
+    } else {
+        *size = 4 * usize::from(data[1]) + usize::from(data[0]);
+        Ok(2)
     }
 }
 
@@ -273,6 +455,17 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+
+    const TEST_PACKET_SINGLE: &[u8] = &[
+        0x80, 0xDA, 0x84, 0xE8, 0x87, 0x77, 0x83, 0xD6, 0x48, 0xB3, 0x6B, 0x45,
+    ];
+    const TEST_PACKET_CBR: &[u8] = &[
+        0x81, 0xDA, 0x84, 0xE8, 0x87, 0x77, 0x83, 0xD6, 0x48, 0xB3, 0x6B,
+    ];
+    const TEST_PACKET_VBR: &[u8] = &[
+        0x82, 0xDA, 0x84, 0xE8, 0x87, 0x77, 0x83, 0xD6, 0x48, 0xB3, 0x6B, 0x45,
+    ];
+    const TEST_PACKET_INVALID: &[u8] = &[0x81, 0xDA];
 
     #[test]
     fn test_query_packet_bandwidth() {
@@ -327,11 +520,11 @@ mod tests {
 
     #[test]
     fn test_query_packet_frame_count() {
-        assert_eq!(query_packet_frame_count(&[0]), Some(1));
-        assert_eq!(query_packet_frame_count(&[1]), Some(2));
-        assert_eq!(query_packet_frame_count(&[2]), Some(2));
-        assert_eq!(query_packet_frame_count(&[3]), None);
-        assert_eq!(query_packet_frame_count(&[3, 5]), Some(5));
+        assert_eq!(query_packet_frame_count(&[0]).unwrap(), 1);
+        assert_eq!(query_packet_frame_count(&[1]).unwrap(), 2);
+        assert_eq!(query_packet_frame_count(&[2]).unwrap(), 2);
+        assert!(query_packet_frame_count(&[3]).is_err());
+        assert_eq!(query_packet_frame_count(&[3, 5]).unwrap(), 5);
     }
 
     #[test]
@@ -382,13 +575,102 @@ mod tests {
     #[test]
     fn test_query_packet_sample_count() {
         assert_eq!(
-            query_packet_sample_count(&[70], SamplingRate::Hz48000),
-            Some(960)
+            query_packet_sample_count(&[70], SamplingRate::Hz48000).unwrap(),
+            960
         );
-        assert_eq!(query_packet_sample_count(&[3], SamplingRate::Hz48000), None);
+        assert!(query_packet_sample_count(&[3], SamplingRate::Hz48000).is_err());
         assert_eq!(
-            query_packet_sample_count(&[255, 5], SamplingRate::Hz48000),
-            Some(4800)
+            query_packet_sample_count(&[255, 5], SamplingRate::Hz48000).unwrap(),
+            4800
         );
+    }
+
+    #[test]
+    fn test_parse_packet_with_single_frame() {
+        let mut frames = [0; 48];
+        let mut sizes = [0; 48];
+        let mut payload_offset = 0;
+        let mut packet_offset = 0;
+
+        let count = parse_packet(
+            TEST_PACKET_SINGLE,
+            false,
+            &mut frames,
+            &mut sizes,
+            Some(&mut payload_offset),
+            Some(&mut packet_offset),
+        )
+        .unwrap();
+
+        assert_eq!(count, 1);
+        assert_eq!(frames[0], 1);
+        assert_eq!(sizes[0], 11);
+        assert_eq!(payload_offset, 1);
+        assert_eq!(packet_offset, 12);
+    }
+
+    fn test_parse_packet_with_two_cbr_frames() {
+        let mut frames = [0; 48];
+        let mut sizes = [0; 48];
+        let mut payload_offset = 0;
+        let mut packet_offset = 0;
+
+        let count = parse_packet(
+            TEST_PACKET_CBR,
+            false,
+            &mut frames,
+            &mut sizes,
+            Some(&mut payload_offset),
+            Some(&mut packet_offset),
+        )
+        .unwrap();
+
+        assert_eq!(count, 2);
+        assert_eq!(frames[0], 1);
+        assert_eq!(sizes[0], 5);
+        assert_eq!(frames[1], 6);
+        assert_eq!(sizes[1], 5);
+        assert_eq!(payload_offset, 1);
+        assert_eq!(packet_offset, 11);
+    }
+
+    fn test_parse_packet_with_two_vbr_frames() {
+        let mut frames = [0; 48];
+        let mut sizes = [0; 48];
+        let mut payload_offset = 0;
+        let mut packet_offset = 0;
+
+        let count = parse_packet(
+            TEST_PACKET_CBR,
+            false,
+            &mut frames,
+            &mut sizes,
+            Some(&mut payload_offset),
+            Some(&mut packet_offset),
+        )
+        .unwrap();
+
+        assert_eq!(count, 2);
+        assert_eq!(frames[0], 1);
+        assert_eq!(sizes[0], 5);
+        assert_eq!(frames[1], 6);
+        assert_eq!(sizes[1], 6);
+        assert_eq!(payload_offset, 1);
+        assert_eq!(packet_offset, 12);
+    }
+
+    fn test_parse_packet_invalid_frame() {
+        let mut frames = [0; 48];
+        let mut sizes = [0; 48];
+
+        assert!(parse_packet(
+            TEST_PACKET_INVALID,
+            false,
+            &mut frames,
+            &mut sizes,
+            None,
+            None,
+        )
+        .is_err())
     }
 }

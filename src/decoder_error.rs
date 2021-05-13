@@ -3,6 +3,8 @@
 /// Errors thrown by the decoder.
 #[derive(Debug)]
 pub enum DecoderError {
+    /// Invalid packet.
+    InvalidPacket,
     /// An internal decoder error.
     InternalError(&'static str),
 }
@@ -12,6 +14,9 @@ impl std::fmt::Display for DecoderError {
         match self {
             DecoderError::InternalError(message) => {
                 write!(f, "{}", message)
+            }
+            DecoderError::InvalidPacket => {
+                write!(f, "invalid packet")
             }
         }
     }
