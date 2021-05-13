@@ -21,6 +21,8 @@ jobs:
       - name: Check format
         run: |
           cargo fmt --all -- --check
+      - name: Check lints
+        run: |
           cargo clippy --all-features -- -D warnings
 
   test:
@@ -35,4 +37,3 @@ jobs:
       - name: Run tests
         run: |
           cargo test --verbose --all
-          cargo clippy --all-features -- -D warnings
