@@ -472,27 +472,26 @@ pub fn pcm_soft_clip(pcm: &mut [f32], channels: usize, softclip_mem: &mut [f32])
     pcm.iter_mut().for_each(|x| *x = x.max(-2.0).min(2.0));
 
     (0..channels).into_iter().for_each(|c| {
-        let mut offset = c;
         let mut a = softclip_mem[c];
 
         // Continue applying the non-linearity from the previous frame to avoid
         // any discontinuity.
         for i in 0..frame_size {
-            if pcm[offset + i * channels] * a >= 0.0 {
+            let off = c + i * channels;
+            if pcm[off] * a >= 0.0 {
                 break;
             }
-            pcm[offset + i * channels] = pcm[offset + i * channels]
-                + a * pcm[offset + i * channels] * pcm[offset + i * channels];
+            pcm[off] += a * pcm[off] * pcm[off];
         }
 
         let mut curr = 0;
-        let pcm_start_value = pcm[offset];
+        let x0 = pcm[c];
 
         loop {
             let mut pos = 0;
             for i in curr..frame_size {
                 pos = i;
-                if pcm[offset + pos * channels] > 1.0 || pcm[offset + pos * channels] < -1.0 {
+                if pcm[c + pos * channels] > 1.0 || pcm[c + pos * channels] < -1.0 {
                     break;
                 }
             }
@@ -505,60 +504,64 @@ pub fn pcm_soft_clip(pcm: &mut [f32], channels: usize, softclip_mem: &mut [f32])
             let mut peak_pos = pos;
             let mut start = pos;
             let mut end = pos;
-            let mut maxval = (pcm[offset + pos * channels]).abs();
+            let mut maxval = (pcm[c + pos * channels]).abs();
 
             // Look for first zero crossing before clipping.
-            while start > 0
-                && pcm[offset + pos * channels] * pcm[offset + (start - 1) * channels] >= 0.0
-            {
+            while start > 0 && pcm[c + pos * channels] * pcm[c + (start - 1) * channels] >= 0.0 {
                 start -= 1;
             }
 
             // Look for first zero crossing after clipping.
-            while end < frame_size
-                && pcm[offset + pos * channels] * pcm[offset + end * channels] >= 0.0
-            {
+            while end < frame_size && pcm[c + pos * channels] * pcm[c + end * channels] >= 0.0 {
                 // Look for other peaks until the next zero-crossing.
-                if (pcm[offset + end * channels]).abs() > maxval {
-                    maxval = (pcm[offset + end * channels]).abs();
+                if pcm[c + end * channels].abs() > maxval {
+                    maxval = pcm[c + end * channels].abs();
                     peak_pos = end;
                 }
                 end += 1;
             }
 
             // Detect the special case where we clip before the first zero crossing.
-            let special = start == 0 && pcm[offset + pos * channels] * pcm[offset] >= 0.0;
+            let special = start == 0 && (pcm[c + pos * channels] * pcm[c]) >= 0.0;
 
             // Compute a such that maxval + a * maxval^2 = 1
-            let mut a = (maxval - 1.0) / (maxval * maxval);
+            a = (maxval - 1.0) / (maxval * maxval);
 
-            if pcm[offset + pos * channels] > 0.0 {
+            // Ported for compatibility with the reference implementation:
+            // Slightly boost "a" by 2^-22. This is just enough to ensure -ffast-math
+            // does not cause output values larger than +/-1, but small enough not
+            // to matter even for 24-bit output.
+            a += a * 2.4e-7;
+
+            if pcm[c + pos * channels] > 0.0 {
                 a = -a;
             }
 
             // Apply soft clipping.
             (start..end).into_iter().for_each(|i| {
-                pcm[offset + i * channels] = pcm[offset + i * channels]
-                    + a * pcm[offset + i * channels] * pcm[offset + i * channels];
+                let off = c + i * channels;
+                pcm[off] += a * pcm[off] * pcm[off];
             });
 
             if special && peak_pos >= 2 {
                 // Add a linear ramp from the first sample to the signal peak.
                 // This avoids a discontinuity at the beginning of the frame.
-                let mut diff = pcm_start_value - pcm[offset];
-                let step = diff / peak_pos as f32;
+                let mut offset = x0 - pcm[c];
+                let delta = offset / peak_pos as f32;
+
                 (curr..peak_pos).into_iter().for_each(|i| {
-                    diff -= step;
-                    pcm[offset + i * channels] += diff;
-                    pcm[offset + i * channels] = pcm[offset + i * channels].max(-1.0).min(1.0);
+                    let off = c + i * channels;
+                    offset -= delta;
+                    pcm[off] += offset;
+                    pcm[off] = pcm[off].max(-1.0).min(1.0);
                 });
             }
+
             curr = end;
             if curr == frame_size {
                 break;
             }
         }
-
         softclip_mem[c] = a;
     });
 }
@@ -798,9 +801,11 @@ mod tests {
 
         (0..1024).into_iter().for_each(|i| {
             (0..1024).into_iter().for_each(|j| {
-                x[j] = (j & 0xFF) as f32 * (1.0 / 32.0) - 4.0;
+                x[j] = (j & 255) as f32 * (1.0 / 32.0) - 4.0;
             });
+
             pcm_soft_clip(&mut x[i..], 1, &mut s);
+
             (i..1024).into_iter().for_each(|j| {
                 assert!(x[j] <= 1.0);
                 assert!(x[j] >= -1.0);
@@ -809,7 +814,7 @@ mod tests {
 
         (1..9).into_iter().for_each(|i| {
             (0..1024).into_iter().for_each(|j| {
-                x[j] = (j & 0xFF) as f32 * (1.0 / 32.0) - 4.0;
+                x[j] = (j & 255) as f32 * (1.0 / 32.0) - 4.0;
             });
             pcm_soft_clip(&mut x, i, &mut s);
             (0..(1024 / i) * i).into_iter().for_each(|j| {
