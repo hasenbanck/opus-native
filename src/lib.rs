@@ -25,8 +25,6 @@
 //! * Frame sizes from 2.5 ms to 60 ms
 //! * Good loss robustness and packet loss concealment (PLC)
 //!
-use std::num::NonZeroUsize;
-
 pub use decoder::*;
 pub use decoder_error::*;
 pub use encoder::*;
@@ -341,7 +339,7 @@ pub fn parse_packet(
     let mut last_size = len;
     let mut cbr = false;
     let mut pad = 0;
-    let mut count: usize;
+    let count: usize;
 
     match packet[0] & 0x3 {
         0 => {
@@ -482,7 +480,7 @@ pub fn parse_packet(
     Ok(count)
 }
 
-fn parse_size(data: &[u8], mut size: &mut usize) -> Result<usize, DecoderError> {
+fn parse_size(data: &[u8], size: &mut usize) -> Result<usize, DecoderError> {
     if data.is_empty() {
         Err(DecoderError::InvalidPacket)
     } else if data[0] < 252 {

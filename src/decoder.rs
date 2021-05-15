@@ -371,7 +371,7 @@ impl Decoder {
                     offset += self.frame_sizes[i];
                     sample_count += count;
                     Ok::<(), DecoderError>(())
-                });
+                })?;
 
                 self.last_packet_duration = Some(sample_count);
                 if soft_clip {
