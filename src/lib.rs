@@ -25,6 +25,8 @@
 //! * Frame sizes from 2.5 ms to 60 ms
 //! * Good loss robustness and packet loss concealment (PLC)
 //!
+use std::num::NonZeroUsize;
+
 pub use decoder::*;
 pub use decoder_error::*;
 pub use encoder::*;
@@ -57,16 +59,45 @@ impl Sample for f32 {
     }
 }
 
+impl Sample for f64 {
+    fn from_f32(float: f32) -> Self {
+        float as f64
+    }
+}
+
 impl Sample for i16 {
     fn from_f32(float: f32) -> Self {
-        let float = float * 32768.0;
-        if float > 32767.0 {
-            32767
-        } else if float < -32768.0 {
-            -32768
-        } else {
-            float as i16
-        }
+        let mut float = float * 32768.0;
+        float = f32::min(float, 32767.0);
+        float = f32::max(float, -32768.0);
+        float as i16
+    }
+}
+
+impl Sample for i32 {
+    fn from_f32(float: f32) -> Self {
+        let mut float = float * 2_147_483_648.0;
+        float = f32::min(float, 2_147_483_647.0);
+        float = f32::max(float, -2_147_483_648.0);
+        float as i32
+    }
+}
+
+impl Sample for u16 {
+    fn from_f32(float: f32) -> Self {
+        let mut float = float * 32768.0 + 32768.0;
+        float = f32::min(float, 32767.0);
+        float = f32::max(float, 0.0);
+        float as u16
+    }
+}
+
+impl Sample for u32 {
+    fn from_f32(float: f32) -> Self {
+        let mut float = float * 2_147_483_648.0 + 2_147_483_648.0;
+        float = f32::min(float, 4_294_967_295.0);
+        float = f32::max(float, 0.0);
+        float as u32
     }
 }
 
@@ -74,9 +105,9 @@ impl Sample for i16 {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Channels {
     /// Mono - 1 channel
-    Mono,
+    Mono = 1,
     /// Stereo - 2 channels
-    Stereo,
+    Stereo = 2,
 }
 
 /// Samples per second.
@@ -154,7 +185,7 @@ impl From<u8> for Bandwidth {
 
 /// Codec mode.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CodecMode {
+pub enum CodecMode {
     /// Silk only.
     Silk,
     /// Hybrid mode.
@@ -184,13 +215,13 @@ pub fn query_packet_bandwidth(packet: &[u8]) -> Bandwidth {
 /// # Arguments
 /// * `packet` - Input payload.
 ///
-pub fn query_packet_channel_count(packet: &[u8]) -> usize {
+pub fn query_packet_channel_count(packet: &[u8]) -> Channels {
     debug_assert!(!packet.is_empty());
 
     if packet[0] & 0x4 != 0 {
-        2
+        Channels::Stereo
     } else {
-        1
+        Channels::Mono
     }
 }
 
@@ -244,7 +275,7 @@ pub fn query_packet_samples_per_frame(packet: &[u8], sampling_rate: SamplingRate
 
 /// Returns the number of samples of an Opus packet.
 ///
-/// Returns `None` if the packet has an invalid format.
+/// Packet must have at least a size of 1.
 ///
 /// # Arguments
 /// * `packet`        - Input payload.
@@ -260,6 +291,21 @@ pub fn query_packet_sample_count(
         Err(DecoderError::InvalidPacket)
     } else {
         Ok(samples)
+    }
+}
+
+/// Returns the codec mode of the Opus packet.
+///
+/// # Arguments
+/// * `packet`        - Input payload.
+///
+pub fn query_packet_codec_mode(packet: &[u8]) -> CodecMode {
+    if packet[0] & 0x80 == 0x80 {
+        CodecMode::Celt
+    } else if packet[0] & 0x60 == 0x60 {
+        CodecMode::Hybrid
+    } else {
+        CodecMode::Silk
     }
 }
 
@@ -284,7 +330,7 @@ pub fn query_packet_sample_count(
 pub fn parse_packet(
     packet: &[u8],
     self_delimited: bool,
-    frames: &mut [usize; 48],
+    mut frames: Option<&mut [usize; 48]>,
     sizes: &mut [usize; 48],
     payload_offset: Option<&mut usize>,
     packet_offset: Option<&mut usize>,
@@ -422,7 +468,10 @@ pub fn parse_packet(
     }
 
     (0..count).into_iter().for_each(|i| {
-        frames[i] = offset;
+        if let Some(frames) = &mut frames {
+            frames[i] = offset;
+        }
+
         offset += sizes[i];
     });
 
@@ -463,13 +512,15 @@ pub fn pcm_soft_clip(pcm: &mut [f32], channels: usize, softclip_mem: &mut [f32])
     if pcm.is_empty() || channels == 0 || softclip_mem.len() < channels {
         return;
     }
+    let channels = channels;
     let frame_size = pcm.len() / channels;
 
     // First thing: saturate everything to +/- 2 which is the highest level our
     // non-linearity can handle. At the point where the signal reaches +/-2,
     // the derivative will be zero anyway, so this doesn't introduce any
     // discontinuity in the derivative.
-    pcm.iter_mut().for_each(|x| *x = x.max(-2.0).min(2.0));
+    pcm.iter_mut()
+        .for_each(|x| *x = f32::min(f32::max(*x, -2.0), 2.0));
 
     (0..channels).into_iter().for_each(|c| {
         let mut a = softclip_mem[c];
@@ -504,7 +555,7 @@ pub fn pcm_soft_clip(pcm: &mut [f32], channels: usize, softclip_mem: &mut [f32])
             let mut peak_pos = pos;
             let mut start = pos;
             let mut end = pos;
-            let mut maxval = (pcm[c + pos * channels]).abs();
+            let mut maxval = f32::abs(pcm[c + pos * channels]);
 
             // Look for first zero crossing before clipping.
             while start > 0 && pcm[c + pos * channels] * pcm[c + (start - 1) * channels] >= 0.0 {
@@ -514,8 +565,8 @@ pub fn pcm_soft_clip(pcm: &mut [f32], channels: usize, softclip_mem: &mut [f32])
             // Look for first zero crossing after clipping.
             while end < frame_size && pcm[c + pos * channels] * pcm[c + end * channels] >= 0.0 {
                 // Look for other peaks until the next zero-crossing.
-                if pcm[c + end * channels].abs() > maxval {
-                    maxval = pcm[c + end * channels].abs();
+                if f32::abs(pcm[c + end * channels]) > maxval {
+                    maxval = f32::abs(pcm[c + end * channels]);
                     peak_pos = end;
                 }
                 end += 1;
@@ -553,7 +604,7 @@ pub fn pcm_soft_clip(pcm: &mut [f32], channels: usize, softclip_mem: &mut [f32])
                     let off = c + i * channels;
                     offset -= delta;
                     pcm[off] += offset;
-                    pcm[off] = pcm[off].max(-1.0).min(1.0);
+                    pcm[off] = f32::min(f32::max(pcm[off], -1.0), 1.0);
                 });
             }
 
@@ -631,8 +682,8 @@ mod tests {
 
     #[test]
     fn test_query_packet_channel_count() {
-        assert_eq!(query_packet_channel_count(&[0]), 1);
-        assert_eq!(query_packet_channel_count(&[0x4]), 2);
+        assert_eq!(query_packet_channel_count(&[0]), Channels::Mono);
+        assert_eq!(query_packet_channel_count(&[0x4]), Channels::Stereo);
     }
 
     #[test]
@@ -712,7 +763,7 @@ mod tests {
         let count = parse_packet(
             TEST_PACKET_SINGLE,
             false,
-            &mut frames,
+            Some(&mut frames),
             &mut sizes,
             Some(&mut payload_offset),
             Some(&mut packet_offset),
@@ -736,7 +787,7 @@ mod tests {
         let count = parse_packet(
             TEST_PACKET_CBR,
             false,
-            &mut frames,
+            Some(&mut frames),
             &mut sizes,
             Some(&mut payload_offset),
             Some(&mut packet_offset),
@@ -762,7 +813,7 @@ mod tests {
         let count = parse_packet(
             TEST_PACKET_VBR,
             false,
-            &mut frames,
+            Some(&mut frames),
             &mut sizes,
             Some(&mut payload_offset),
             Some(&mut packet_offset),
@@ -786,7 +837,7 @@ mod tests {
         assert!(parse_packet(
             TEST_PACKET_INVALID,
             false,
-            &mut frames,
+            Some(&mut frames),
             &mut sizes,
             None,
             None,

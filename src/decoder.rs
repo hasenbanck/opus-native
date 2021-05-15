@@ -1,8 +1,15 @@
 //! Implement the Opus decoder.
 
+use std::num::NonZeroUsize;
+
 use crate::celt::CeltDecoder;
 use crate::silk::SilkDecoder;
-use crate::{Bandwidth, Channels, CodecMode, DecoderError, Sample, SamplingRate};
+use crate::DecoderError::FrameSizeTooSmall;
+use crate::{
+    parse_packet, pcm_soft_clip, query_packet_bandwidth, query_packet_channel_count,
+    query_packet_codec_mode, query_packet_sample_count, query_packet_samples_per_frame, Bandwidth,
+    Channels, CodecMode, DecoderError, Sample, SamplingRate,
+};
 
 /// Configures the decoder on creation.
 ///
@@ -42,6 +49,7 @@ impl Default for DecoderConfiguration {
 /// the decoder with `None` for the missing packet.
 #[derive(Clone, Debug)]
 pub struct Decoder {
+    out_buffer: Vec<f32>,
     celt_dec: CeltDecoder,
     silk_dec: SilkDecoder,
     channels: Channels,
@@ -54,7 +62,9 @@ pub struct Decoder {
     prev_mode: Option<CodecMode>,
     frame_size: usize,
     prev_redundancy: Option<usize>,
-    last_packet_duration: Option<u32>,
+    last_packet_duration: Option<usize>,
+    // 48 x 2.5 ms = 120 ms
+    frame_sizes: [usize; 48],
     softclip_mem: [f32; 2],
 
     final_range: u32,
@@ -67,6 +77,7 @@ impl Decoder {
         let silk_dec = SilkDecoder::new(configuration.sampling_rate, configuration.channels)?;
 
         Ok(Self {
+            out_buffer: vec![],
             celt_dec,
             silk_dec,
             sampling_rate: configuration.sampling_rate,
@@ -79,6 +90,7 @@ impl Decoder {
             frame_size: configuration.sampling_rate as usize / 400,
             prev_redundancy: None,
             last_packet_duration: None,
+            frame_sizes: [0_usize; 48],
             softclip_mem: [0f32; 2],
             final_range: 0,
         })
@@ -100,6 +112,7 @@ impl Decoder {
         self.frame_size = self.sampling_rate as usize / 400;
         self.prev_redundancy = None;
         self.last_packet_duration = None;
+        self.frame_sizes = [0_usize; 48];
         self.softclip_mem = [0f32; 2];
 
         Ok(())
@@ -138,7 +151,7 @@ impl Decoder {
     }
 
     /// Returns the duration (in samples) of the last packet successfully decoded or concealed.
-    pub fn last_packet_duration(&self) -> Option<u32> {
+    pub fn last_packet_duration(&self) -> Option<usize> {
         self.last_packet_duration
     }
 
@@ -153,7 +166,7 @@ impl Decoder {
 
     /// Decode an Opus packet with a generic sample output.
     ///
-    /// Returns number of decoded samples.
+    /// Returns number of decoded samples for one channel.
     ///
     /// Caller needs to make sure that the samples buffer has enough space to fit
     /// all samples inside the packet. Call `query_packet_sample_count()` to query
@@ -175,17 +188,45 @@ impl Decoder {
     ///                  If no such data is available, the frame is decoded as if it were lost.
     ///
     pub fn decode<S: Sample>(
-        _packet: Option<&[u8]>,
-        _samples: &mut [S],
-        _frame_size: usize,
-        _decode_fec: bool,
-    ) -> Result<u32, DecoderError> {
-        unimplemented!()
+        &mut self,
+        packet: Option<&[u8]>,
+        samples: &mut [S],
+        frame_size: NonZeroUsize,
+        decode_fec: bool,
+    ) -> Result<usize, DecoderError> {
+        let mut frame_size = frame_size.get();
+        if !decode_fec {
+            if let Some(packet) = packet {
+                let sample_count = query_packet_sample_count(&packet, self.sampling_rate)?;
+                if sample_count == 0 {
+                    return Err(DecoderError::InvalidPacket);
+                }
+                frame_size = usize::min(frame_size, sample_count);
+            }
+        }
+
+        let size = frame_size * self.channels as usize;
+        if self.out_buffer.len() < size {
+            self.out_buffer.resize(size, 0_f32);
+        }
+
+        let (sample_count, _) =
+            self.decode_native(&packet, &mut None, frame_size, decode_fec, false, true)?;
+
+        if sample_count > 0 {
+            (0..sample_count * self.channels as usize)
+                .into_iter()
+                .for_each(|i| {
+                    samples[i] = S::from_f32(self.out_buffer[i]);
+                });
+        }
+
+        Ok(sample_count)
     }
 
     /// Decode an Opus packet with floating point output.
     ///
-    /// Returns number of decoded samples.
+    /// Returns number of decoded samples for one channel.
     ///
     /// Caller needs to make sure that the samples buffer has enough space to fit
     /// all samples inside the packet. Call `query_packet_sample_count()` to query
@@ -205,24 +246,181 @@ impl Decoder {
     ///                  If no such data is available, the frame is decoded as if it were lost.
     ///
     pub fn decode_float(
-        _packet: Option<&[u8]>,
-        _samples: &mut [f32],
-        _frame_size: usize,
-        _decode_fec: bool,
-    ) -> Result<u32, DecoderError> {
-        unimplemented!()
+        &mut self,
+        packet: Option<&[u8]>,
+        samples: &mut [f32],
+        frame_size: NonZeroUsize,
+        decode_fec: bool,
+    ) -> Result<usize, DecoderError> {
+        let (sample_count, _) = self.decode_native(
+            &packet,
+            &mut Some(samples),
+            frame_size.get(),
+            decode_fec,
+            false,
+            false,
+        )?;
+        Ok(sample_count)
     }
 
     /// Returns the samples decoded and the packet_offset (used for multiple streams).
     fn decode_native(
         &mut self,
-        _packet: Option<&[u8]>,
-        _samples: &mut [f32],
-        _frame_size: usize,
-        _decode_fec: bool,
-        _self_delimited: usize,
-        _soft_clip: bool,
-    ) -> (u32, usize) {
+        packet: &Option<&[u8]>,
+        samples: &mut Option<&mut [f32]>,
+        frame_size: usize,
+        decode_fec: bool,
+        self_delimited: bool,
+        soft_clip: bool,
+    ) -> Result<(usize, usize), DecoderError> {
+        // The frame_size has to be to have a multiple of 2.5 ms.
+        if frame_size % (self.sampling_rate as usize / 400) != 0 {
+            return Err(DecoderError::BadArguments(
+                "frame_size must be a multiple of 2.5 ms of the sampling rate",
+            ));
+        }
+
+        if let Some(packet) = packet {
+            if packet.is_empty() {
+                return Err(DecoderError::BadArguments("packet is empty"));
+            }
+            let mut offset = 0;
+            let mut packet_offset = 0;
+
+            let packet_mode = query_packet_codec_mode(packet);
+            let packet_bandwidth = query_packet_bandwidth(packet);
+            let packet_frame_size = query_packet_samples_per_frame(packet, self.sampling_rate);
+            let packet_stream_channels = query_packet_channel_count(packet);
+
+            let count = parse_packet(
+                packet,
+                false,
+                None,
+                &mut self.frame_sizes,
+                Some(&mut offset),
+                Some(&mut packet_offset),
+            )?;
+
+            if decode_fec {
+                // If no FEC can be present, run the PLC (recursive call).
+                if frame_size < packet_frame_size
+                    || packet_mode == CodecMode::Celt
+                    || self.mode == Some(CodecMode::Celt)
+                {
+                    return self.decode_native(&None, samples, frame_size, false, false, soft_clip);
+                }
+
+                // Otherwise, run the PLC on everything except the size for which we might have FEC.
+                let duration_copy = self.last_packet_duration;
+                if frame_size - packet_frame_size != 0 {
+                    let sample_count = match self.decode_native(
+                        &None,
+                        samples,
+                        frame_size - packet_frame_size,
+                        false,
+                        false,
+                        soft_clip,
+                    ) {
+                        Ok((sample_count, ..)) => sample_count,
+                        Err(err) => {
+                            self.last_packet_duration = duration_copy;
+                            return Err(err);
+                        }
+                    };
+                    debug_assert_eq!(sample_count, frame_size - packet_frame_size);
+                }
+
+                // Complete with FEC.
+                self.mode = Some(packet_mode);
+                self.bandwidth = packet_bandwidth;
+                self.frame_size = packet_frame_size;
+                self.stream_channels = packet_stream_channels;
+
+                let sample_count = self.decode_frame(
+                    &Some(&packet[offset + self.frame_sizes[0]..]),
+                    &samples,
+                    (frame_size - packet_frame_size) * self.channels as usize,
+                    packet_frame_size,
+                    true,
+                )?;
+                self.last_packet_duration = Some(frame_size);
+
+                Ok((frame_size, packet_offset))
+            } else {
+                if count * packet_frame_size > frame_size {
+                    return Err(FrameSizeTooSmall);
+                }
+
+                self.mode = Some(packet_mode);
+                self.bandwidth = packet_bandwidth;
+                self.frame_size = packet_frame_size;
+                self.stream_channels = packet_stream_channels;
+
+                // Update the state as the last step to avoid updating it on an invalid packet.
+                let mut sample_count = 0;
+                (0..count).into_iter().try_for_each(|i| {
+                    let count = self.decode_frame(
+                        &Some(&packet[offset + self.frame_sizes[i]..]),
+                        samples,
+                        sample_count * self.channels as usize,
+                        frame_size - sample_count,
+                        false,
+                    )?;
+                    debug_assert_eq!(count, packet_frame_size);
+
+                    offset += self.frame_sizes[i];
+                    sample_count += count;
+                    Ok::<(), DecoderError>(())
+                });
+
+                self.last_packet_duration = Some(sample_count);
+                if soft_clip {
+                    if let Some(samples) = samples.as_mut() {
+                        pcm_soft_clip(
+                            &mut samples[..sample_count],
+                            self.channels as usize,
+                            &mut self.softclip_mem,
+                        );
+                    } else {
+                        pcm_soft_clip(
+                            &mut self.out_buffer[..sample_count],
+                            self.channels as usize,
+                            &mut self.softclip_mem,
+                        );
+                    }
+                } else {
+                    self.softclip_mem[0] = 0.0;
+                    self.softclip_mem[1] = 0.0;
+                }
+
+                Ok((sample_count, packet_offset))
+            }
+        } else {
+            let mut sample_count = 0;
+            while sample_count < frame_size {
+                let count = self.decode_frame(
+                    &None,
+                    &samples,
+                    sample_count * self.channels as usize,
+                    frame_size - sample_count,
+                    false,
+                )?;
+                sample_count += count;
+            }
+            debug_assert_eq!(sample_count, frame_size);
+            self.last_packet_duration = Some(sample_count);
+            Ok((sample_count, 0))
+        }
+    }
+
+    fn decode_frame(
+        &mut self,
+        packet: &Option<&[u8]>,
+        samples: &Option<&mut [f32]>,
+        sample_offset: usize,
+        frame_size: usize,
+        decode_fec: bool,
+    ) -> Result<usize, DecoderError> {
         unimplemented!()
     }
 }
