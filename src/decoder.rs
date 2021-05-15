@@ -213,7 +213,11 @@ impl Decoder {
         let (sample_count, _) =
             self.decode_native(&packet, &mut None, frame_size, decode_fec, false, true)?;
 
-        if sample_count > 0 {
+        if sample_count != 0 {
+            if sample_count > samples.len() {
+                return Err(DecoderError::BufferToSmall);
+            }
+
             (0..sample_count * self.channels as usize)
                 .into_iter()
                 .for_each(|i| {
