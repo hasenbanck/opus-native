@@ -52,50 +52,72 @@ pub trait Sample {
 }
 
 impl Sample for f32 {
+    #[inline(always)]
     fn from_f32(float: f32) -> Self {
         float
     }
 }
 
 impl Sample for f64 {
+    #[inline(always)]
     fn from_f32(float: f32) -> Self {
         float as f64
     }
 }
 
 impl Sample for i16 {
+    #[inline(always)]
     fn from_f32(float: f32) -> Self {
-        let mut float = float * 32768.0;
-        float = f32::min(float, 32767.0);
-        float = f32::max(float, -32768.0);
-        float as i16
+        let float = float * 32768.0;
+        if float > 32767.0 {
+            32767
+        } else if float < -32768.0 {
+            -32768
+        } else {
+            float as i16
+        }
     }
 }
 
 impl Sample for i32 {
+    #[inline(always)]
     fn from_f32(float: f32) -> Self {
-        let mut float = float * 2_147_483_648.0;
-        float = f32::min(float, 2_147_483_647.0);
-        float = f32::max(float, -2_147_483_648.0);
-        float as i32
+        let float = float * 2_147_483_648.0;
+        if float > 2_147_483_647.0 {
+            2_147_483_647
+        } else if float < -2_147_483_648.0 {
+            -2_147_483_648
+        } else {
+            float as i32
+        }
     }
 }
 
 impl Sample for u16 {
+    #[inline(always)]
     fn from_f32(float: f32) -> Self {
-        let mut float = float * 32768.0 + 32768.0;
-        float = f32::min(float, 32767.0);
-        float = f32::max(float, 0.0);
-        float as u16
+        let float = float * 32768.0 + 32768.0;
+        if float > 32767.0 {
+            32767
+        } else if float < 0.0 {
+            0
+        } else {
+            float as u16
+        }
     }
 }
 
 impl Sample for u32 {
+    #[inline(always)]
     fn from_f32(float: f32) -> Self {
-        let mut float = float * 2_147_483_648.0 + 2_147_483_648.0;
-        float = f32::min(float, 4_294_967_295.0);
-        float = f32::max(float, 0.0);
-        float as u32
+        let float = float * 2_147_483_648.0 + 2_147_483_648.0;
+        if float > 4_294_967_295.0 {
+            4_294_967_295
+        } else if float < 0.0 {
+            0
+        } else {
+            float as u32
+        }
     }
 }
 
