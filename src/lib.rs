@@ -69,13 +69,7 @@ impl Sample for i16 {
     #[inline(always)]
     fn from_f32(float: f32) -> Self {
         let float = float * 32768.0;
-        if float > 32767.0 {
-            32767
-        } else if float < -32768.0 {
-            -32768
-        } else {
-            float as i16
-        }
+        float.clamp(-32768.0, 32767.0) as i16
     }
 }
 
@@ -83,13 +77,7 @@ impl Sample for i32 {
     #[inline(always)]
     fn from_f32(float: f32) -> Self {
         let float = float * 2_147_483_648.0;
-        if float > 2_147_483_647.0 {
-            2_147_483_647
-        } else if float < -2_147_483_648.0 {
-            -2_147_483_648
-        } else {
-            float as i32
-        }
+        float.clamp(-2_147_483_648.0, 2_147_483_647.0) as i32
     }
 }
 
@@ -97,13 +85,7 @@ impl Sample for u16 {
     #[inline(always)]
     fn from_f32(float: f32) -> Self {
         let float = float * 32768.0 + 32768.0;
-        if float > 32767.0 {
-            32767
-        } else if float < 0.0 {
-            0
-        } else {
-            float as u16
-        }
+        float.clamp(0.0, 32768.0) as u16
     }
 }
 
@@ -111,13 +93,7 @@ impl Sample for u32 {
     #[inline(always)]
     fn from_f32(float: f32) -> Self {
         let float = float * 2_147_483_648.0 + 2_147_483_648.0;
-        if float > 4_294_967_295.0 {
-            4_294_967_295
-        } else if float < 0.0 {
-            0
-        } else {
-            float as u32
-        }
+        float.clamp(0.0, 2_147_483_648.0) as u32
     }
 }
 
@@ -539,8 +515,7 @@ pub fn pcm_soft_clip(pcm: &mut [f32], channels: usize, softclip_mem: &mut [f32])
     // non-linearity can handle. At the point where the signal reaches +/-2,
     // the derivative will be zero anyway, so this doesn't introduce any
     // discontinuity in the derivative.
-    pcm.iter_mut()
-        .for_each(|x| *x = f32::min(f32::max(*x, -2.0), 2.0));
+    pcm.iter_mut().for_each(|x| *x = x.clamp(-2.0, 2.0));
 
     (0..channels).into_iter().for_each(|c| {
         let mut a = softclip_mem[c];
@@ -624,7 +599,7 @@ pub fn pcm_soft_clip(pcm: &mut [f32], channels: usize, softclip_mem: &mut [f32])
                     let off = c + i * channels;
                     offset -= delta;
                     pcm[off] += offset;
-                    pcm[off] = f32::min(f32::max(pcm[off], -1.0), 1.0);
+                    pcm[off] = pcm[off].clamp(-1.0, 1.0);
                 });
             }
 
