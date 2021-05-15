@@ -341,7 +341,7 @@ impl Decoder {
                 self.stream_channels = packet_stream_channels;
 
                 let sample_count = self.decode_frame(
-                    &Some(&packet[offset + self.frame_sizes[0]..]),
+                    &Some(&packet[offset..offset + self.frame_sizes[0]]),
                     &samples,
                     (frame_size - packet_frame_size) * self.channels as usize,
                     packet_frame_size,
@@ -364,7 +364,7 @@ impl Decoder {
                 let mut sample_count = 0;
                 (0..count).into_iter().try_for_each(|i| {
                     let count = self.decode_frame(
-                        &Some(&packet[offset + self.frame_sizes[i]..]),
+                        &Some(&packet[offset..offset + self.frame_sizes[i]]),
                         samples,
                         sample_count * self.channels as usize,
                         frame_size - sample_count,
