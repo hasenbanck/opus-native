@@ -428,3 +428,22 @@ impl Decoder {
         unimplemented!()
     }
 }
+
+fn smooth_fade(
+    in1: &[f32],
+    in2: &[f32],
+    out: &mut [f32],
+    overlap: usize,
+    channels: usize,
+    window: &[f32],
+    sampling_size: usize,
+) {
+    let inc = 48000 / sampling_size;
+    (0..channels).into_iter().for_each(|c| {
+        (0..overlap).into_iter().for_each(|i| {
+            let w = window[i * inc] * window[i * inc];
+            out[c + i * channels] =
+                (w * in2[i * channels + c]) + ((1.0 - w) * in1[i * channels + c]);
+        });
+    });
+}
