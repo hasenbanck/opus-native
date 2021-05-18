@@ -10,6 +10,8 @@ use crate::range_coder::{
 pub(crate) struct RangeDecoder<'d> {
     /// Buffered input.
     buffer: &'d [u8],
+    /// The size of the currently used region of the buffer.
+    storage: usize,
     /// The offset at which the last byte containing raw bits was read.
     end_offs: usize,
     /// Bits that will be read from at the end.
@@ -54,6 +56,7 @@ impl<'d> RangeDecoder<'d> {
 
         let mut dec = Self {
             buffer,
+            storage: buffer.len(),
             end_offs: 0,
             end_window: 0,
             end_bits: 0,
@@ -74,9 +77,14 @@ impl<'d> RangeDecoder<'d> {
         dec
     }
 
+    /// Lowers the length of the usable buffer.
+    pub(crate) fn remove_storage(&mut self, length: usize) {
+        self.storage -= length;
+    }
+
     /// Reads the next byte from the start of the buffer.
     fn read_byte(&mut self) -> u8 {
-        if self.offs < self.buffer.len() {
+        if self.offs < self.storage {
             let b = self.buffer[self.offs];
             self.offs += 1;
             b
@@ -87,10 +95,9 @@ impl<'d> RangeDecoder<'d> {
 
     /// Reads the next byte from the end of the buffer.
     fn read_byte_from_end(&mut self) -> u8 {
-        let size = self.buffer.len();
-        if self.end_offs < size {
+        if self.end_offs < self.storage {
             self.end_offs += 1;
-            self.buffer[size - self.end_offs]
+            self.buffer[self.storage - self.end_offs]
         } else {
             0
         }

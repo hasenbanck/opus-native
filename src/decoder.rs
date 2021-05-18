@@ -1,15 +1,23 @@
 //! Implement the Opus decoder.
 
+use std::cmp::Ordering;
 use std::num::NonZeroUsize;
 
 use crate::celt::CeltDecoder;
-use crate::silk::SilkDecoder;
+use crate::range_coder::{RangeDecoder, Tell};
+use crate::silk::{LostFlag, SilkDecoder};
 use crate::DecoderError::FrameSizeTooSmall;
 use crate::{
     parse_packet, pcm_soft_clip, query_packet_bandwidth, query_packet_channel_count,
     query_packet_codec_mode, query_packet_sample_count, query_packet_samples_per_frame, Bandwidth,
     Channels, CodecMode, DecoderError, Sample, SamplingRate,
 };
+
+enum SampleBuffer<'a> {
+    Extern(&'a mut [f32]),
+    Intern,
+    Transition,
+}
 
 /// Configures the decoder on creation.
 ///
@@ -49,7 +57,6 @@ impl Default for DecoderConfiguration {
 /// the decoder with `None` for the missing packet.
 #[derive(Clone, Debug)]
 pub struct Decoder {
-    out_buffer: Vec<f32>,
     celt_dec: CeltDecoder,
     silk_dec: SilkDecoder,
     channels: Channels,
@@ -57,15 +64,20 @@ pub struct Decoder {
     decode_gain: i16,
 
     stream_channels: Channels,
-    bandwidth: Bandwidth,
+    bandwidth: Option<Bandwidth>,
     mode: Option<CodecMode>,
     prev_mode: Option<CodecMode>,
     frame_size: usize,
-    prev_redundancy: Option<usize>,
+    prev_redundancy: bool,
     last_packet_duration: Option<usize>,
     // 48 x 2.5 ms = 120 ms
     frame_sizes: [usize; 48],
     softclip_mem: [f32; 2],
+
+    output_buffer: Vec<f32>,
+    transition_buffer: Vec<f32>,
+    silk_buffer: Vec<f32>,
+    redundant_audio: Vec<f32>,
 
     final_range: u32,
 }
@@ -77,21 +89,24 @@ impl Decoder {
         let silk_dec = SilkDecoder::new(configuration.sampling_rate, configuration.channels)?;
 
         Ok(Self {
-            out_buffer: vec![],
             celt_dec,
             silk_dec,
             sampling_rate: configuration.sampling_rate,
             channels: configuration.channels,
             decode_gain: configuration.gain,
             stream_channels: configuration.channels,
-            bandwidth: Bandwidth::Auto,
+            bandwidth: None,
             mode: None,
             prev_mode: None,
             frame_size: configuration.sampling_rate as usize / 400,
-            prev_redundancy: None,
+            prev_redundancy: false,
             last_packet_duration: None,
             frame_sizes: [0_usize; 48],
             softclip_mem: [0f32; 2],
+            output_buffer: vec![],
+            transition_buffer: vec![],
+            silk_buffer: vec![],
+            redundant_audio: vec![],
             final_range: 0,
         })
     }
@@ -106,14 +121,18 @@ impl Decoder {
         self.celt_dec.reset()?;
 
         self.stream_channels = self.channels;
-        self.bandwidth = Bandwidth::Auto;
+        self.bandwidth = None;
         self.mode = None;
         self.prev_mode = None;
         self.frame_size = self.sampling_rate as usize / 400;
-        self.prev_redundancy = None;
+        self.prev_redundancy = false;
         self.last_packet_duration = None;
         self.frame_sizes = [0_usize; 48];
         self.softclip_mem = [0f32; 2];
+        self.output_buffer = vec![];
+        self.transition_buffer = vec![];
+        self.silk_buffer = vec![];
+        self.redundant_audio = vec![];
 
         Ok(())
     }
@@ -134,7 +153,7 @@ impl Decoder {
     }
 
     /// Returns the decoder's last bandpass.
-    pub fn bandwidth(&self) -> Bandwidth {
+    pub fn bandwidth(&self) -> Option<Bandwidth> {
         self.bandwidth
     }
 
@@ -142,8 +161,8 @@ impl Decoder {
     pub fn pitch(&self) -> Option<u32> {
         if let Some(prev_mode) = self.prev_mode {
             match prev_mode {
-                CodecMode::Celt => Some(self.celt_dec.pitch()),
-                CodecMode::Silk | CodecMode::Hybrid => Some(self.silk_dec.pitch()),
+                CodecMode::CeltOnly => Some(self.celt_dec.pitch()),
+                CodecMode::SilkOnly | CodecMode::Hybrid => Some(self.silk_dec.pitch()),
             }
         } else {
             None
@@ -206,12 +225,18 @@ impl Decoder {
         }
 
         let size = frame_size * self.channels as usize;
-        if self.out_buffer.len() < size {
-            self.out_buffer.resize(size, 0_f32);
+        if self.output_buffer.len() < size {
+            self.output_buffer.resize(size, 0_f32);
         }
 
-        let (sample_count, _) =
-            self.decode_native(&packet, &mut None, frame_size, decode_fec, false, true)?;
+        let (sample_count, _) = self.decode_native(
+            &packet,
+            &mut SampleBuffer::Intern,
+            frame_size,
+            decode_fec,
+            false,
+            true,
+        )?;
 
         if sample_count != 0 {
             if sample_count > samples.len() {
@@ -221,7 +246,7 @@ impl Decoder {
             (0..sample_count * self.channels as usize)
                 .into_iter()
                 .for_each(|i| {
-                    samples[i] = S::from_f32(self.out_buffer[i]);
+                    samples[i] = S::from_f32(self.output_buffer[i]);
                 });
         }
 
@@ -258,7 +283,7 @@ impl Decoder {
     ) -> Result<usize, DecoderError> {
         let (sample_count, _) = self.decode_native(
             &packet,
-            &mut Some(samples),
+            &mut SampleBuffer::Extern(samples),
             frame_size.get(),
             decode_fec,
             false,
@@ -271,7 +296,7 @@ impl Decoder {
     fn decode_native(
         &mut self,
         packet: &Option<&[u8]>,
-        samples: &mut Option<&mut [f32]>,
+        samples: &mut SampleBuffer,
         frame_size: usize,
         decode_fec: bool,
         self_delimited: bool,
@@ -298,7 +323,7 @@ impl Decoder {
 
             let count = parse_packet(
                 packet,
-                false,
+                self_delimited,
                 None,
                 &mut self.frame_sizes,
                 Some(&mut offset),
@@ -308,8 +333,8 @@ impl Decoder {
             if decode_fec {
                 // If no FEC can be present, run the PLC (recursive call).
                 if frame_size < packet_frame_size
-                    || packet_mode == CodecMode::Celt
-                    || self.mode == Some(CodecMode::Celt)
+                    || packet_mode == CodecMode::CeltOnly
+                    || self.mode == Some(CodecMode::CeltOnly)
                 {
                     return self.decode_native(&None, samples, frame_size, false, false, soft_clip);
                 }
@@ -336,13 +361,13 @@ impl Decoder {
 
                 // Complete with FEC.
                 self.mode = Some(packet_mode);
-                self.bandwidth = packet_bandwidth;
+                self.bandwidth = Some(packet_bandwidth);
                 self.frame_size = packet_frame_size;
                 self.stream_channels = packet_stream_channels;
 
-                let sample_count = self.decode_frame(
+                self.decode_frame(
                     &Some(&packet[offset..offset + self.frame_sizes[0]]),
-                    &samples,
+                    samples,
                     (frame_size - packet_frame_size) * self.channels as usize,
                     packet_frame_size,
                     true,
@@ -356,7 +381,7 @@ impl Decoder {
                 }
 
                 self.mode = Some(packet_mode);
-                self.bandwidth = packet_bandwidth;
+                self.bandwidth = Some(packet_bandwidth);
                 self.frame_size = packet_frame_size;
                 self.stream_channels = packet_stream_channels;
 
@@ -379,19 +404,29 @@ impl Decoder {
 
                 self.last_packet_duration = Some(sample_count);
                 if soft_clip {
-                    if let Some(samples) = samples.as_mut() {
-                        pcm_soft_clip(
-                            &mut samples[..sample_count],
-                            self.channels as usize,
-                            &mut self.softclip_mem,
-                        );
-                    } else {
-                        pcm_soft_clip(
-                            &mut self.out_buffer[..sample_count],
-                            self.channels as usize,
-                            &mut self.softclip_mem,
-                        );
-                    }
+                    match samples {
+                        SampleBuffer::Extern(buf) => {
+                            pcm_soft_clip(
+                                &mut buf[..sample_count],
+                                self.channels as usize,
+                                &mut self.softclip_mem,
+                            );
+                        }
+                        SampleBuffer::Intern => {
+                            pcm_soft_clip(
+                                &mut self.output_buffer[..sample_count],
+                                self.channels as usize,
+                                &mut self.softclip_mem,
+                            );
+                        }
+                        SampleBuffer::Transition => {
+                            pcm_soft_clip(
+                                &mut self.transition_buffer[..sample_count],
+                                self.channels as usize,
+                                &mut self.softclip_mem,
+                            );
+                        }
+                    };
                 } else {
                     self.softclip_mem[0] = 0.0;
                     self.softclip_mem[1] = 0.0;
@@ -404,7 +439,7 @@ impl Decoder {
             while sample_count < frame_size {
                 let count = self.decode_frame(
                     &None,
-                    &samples,
+                    samples,
                     sample_count * self.channels as usize,
                     frame_size - sample_count,
                     false,
@@ -417,32 +452,658 @@ impl Decoder {
         }
     }
 
+    // TODO try to deduplicate the "match samples" code. We could try to guess which code paths are actually possible and reduce them.
+    #[allow(clippy::excessive_precision)]
     fn decode_frame(
         &mut self,
         packet: &Option<&[u8]>,
-        samples: &Option<&mut [f32]>,
-        sample_offset: usize,
-        frame_size: usize,
+        samples: &mut SampleBuffer,
+        mut sample_offset: usize,
+        mut frame_size: usize,
         decode_fec: bool,
     ) -> Result<usize, DecoderError> {
-        unimplemented!()
+        let mut redundancy = false;
+        let mut redundancy_bytes = 0;
+        let mut celt_to_silk = false;
+        let mut redundant_range: u32 = 0;
+        let mut len = packet.map_or(0, |x| x.len()) as u32;
+
+        let f20 = self.sampling_rate as usize / 50;
+        let f10 = f20 >> 1;
+        let f5 = f10 >> 1;
+        let f2_5 = f5 >> 1;
+        if frame_size < f2_5 {
+            return Err(DecoderError::FrameSizeTooSmall);
+        }
+
+        // Payloads of 1 (2 including ToC) or 0 trigger the PLC/DTX.
+        let (audiosize, mode, bandwidth) = if len <= 1 {
+            // In that case, don't conceal more than what the ToC says.
+            frame_size = usize::min(frame_size, self.frame_size);
+
+            let mut audiosize = frame_size;
+            let mode = self.prev_mode;
+            let bandwidth = None;
+
+            if mode.is_none() {
+                // If we haven't got any packet yet, all we can do is return zeros.
+                match samples {
+                    SampleBuffer::Extern(ref mut buf) => {
+                        (0..audiosize * self.channels as usize)
+                            .into_iter()
+                            .for_each(|i| {
+                                buf[sample_offset + i] = 0.0;
+                            });
+                    }
+                    SampleBuffer::Intern => {
+                        (0..audiosize * self.channels as usize)
+                            .into_iter()
+                            .for_each(|i| {
+                                self.output_buffer[sample_offset + i] = 0.0;
+                            });
+                    }
+                    SampleBuffer::Transition => {
+                        (0..audiosize * self.channels as usize)
+                            .into_iter()
+                            .for_each(|i| {
+                                self.transition_buffer[sample_offset + i] = 0.0;
+                            });
+                    }
+                };
+
+                return Ok(audiosize);
+            }
+
+            // Avoids trying to run the PLC on sizes other than 2.5 (CELT), 5 (CELT), 10, or 20 (e.g. 12.5 or 30 ms).
+            match audiosize.cmp(&f20) {
+                Ordering::Greater => {
+                    while audiosize > 0 {
+                        let sample_count = self.decode_frame(
+                            &None,
+                            samples,
+                            sample_offset,
+                            usize::min(audiosize, f20),
+                            false,
+                        )?;
+                        sample_offset += sample_count * self.channels as usize;
+                        audiosize -= sample_count;
+                    }
+                    return Ok(frame_size);
+                }
+                Ordering::Less => {
+                    if audiosize > f10 {
+                        audiosize = f10;
+                    } else if mode != Some(CodecMode::SilkOnly) && audiosize > f5 && audiosize < f10
+                    {
+                        audiosize = f5;
+                    }
+                }
+                Ordering::Equal => { /* Case not covered by the reference implementation */ }
+            }
+
+            (audiosize, mode, bandwidth)
+        } else {
+            (self.frame_size, self.mode, self.bandwidth)
+        };
+
+        // Initialize the range decoder if we have a packet.
+        let mut dec = packet.as_ref().map(|packet| RangeDecoder::new(packet));
+
+        let (mut transition, mut pcm_transition_silk_size, pcm_transition_celt_size) = if packet
+            .is_some()
+            && self.prev_mode.is_some()
+            && ((mode == Some(CodecMode::CeltOnly)
+                && self.prev_mode != Some(CodecMode::CeltOnly)
+                && self.prev_redundancy)
+                || (mode != Some(CodecMode::CeltOnly)
+                    && self.prev_mode == Some(CodecMode::CeltOnly)))
+        {
+            let size = f5 * self.channels as usize;
+            if mode == Some(CodecMode::CeltOnly) {
+                (true, None, Some(size))
+            } else {
+                (true, Some(size), None)
+            }
+        } else {
+            (false, None, None)
+        };
+
+        if let Some(size) = pcm_transition_celt_size {
+            if size > self.transition_buffer.len() {
+                self.transition_buffer.resize(size, 0_f32);
+            }
+        };
+
+        if transition && mode == Some(CodecMode::CeltOnly) {
+            self.decode_frame(
+                &None,
+                &mut SampleBuffer::Transition,
+                0,
+                usize::min(f5, audiosize),
+                false,
+            )?;
+        }
+
+        if audiosize > frame_size {
+            return Err(DecoderError::FrameSizeTooSmall);
+        } else {
+            frame_size = audiosize;
+        }
+
+        // SILK processing.
+        if mode != Some(CodecMode::CeltOnly) {
+            let mut silk_frame_size = frame_size * self.channels as usize;
+            if silk_frame_size > self.silk_buffer.len() {
+                self.silk_buffer.resize(silk_frame_size, 0_f32);
+            }
+
+            if self.prev_mode == Some(CodecMode::CeltOnly) {
+                self.silk_dec.reset()?;
+            }
+
+            // The SILK PLC cannot produce frames of less than 10 ms.
+            self.silk_dec.set_payload_size_ms(usize::max(
+                10,
+                1000 * audiosize / self.sampling_rate as usize,
+            ));
+
+            if packet.is_some() {
+                self.silk_dec.set_internal_channels(self.stream_channels);
+                if mode == Some(CodecMode::SilkOnly) {
+                    if bandwidth == Some(Bandwidth::Narrowband) {
+                        self.silk_dec
+                            .set_internal_sampling_rate(SamplingRate::Hz8000);
+                    } else if bandwidth == Some(Bandwidth::Mediumband) {
+                        self.silk_dec
+                            .set_internal_sampling_rate(SamplingRate::Hz12000);
+                    } else if bandwidth == Some(Bandwidth::Wideband) {
+                        self.silk_dec
+                            .set_internal_sampling_rate(SamplingRate::Hz16000);
+                    } else {
+                        // TODO can this happen normally? Should we return an error instead?
+                        self.silk_dec
+                            .set_internal_sampling_rate(SamplingRate::Hz16000);
+                        debug_assert!(false);
+                    }
+                } else {
+                    // Hybrid mode.
+                    self.silk_dec
+                        .set_internal_sampling_rate(SamplingRate::Hz16000);
+                }
+            }
+
+            let lost_flag = if packet.is_none() {
+                LostFlag::Loss
+            } else if decode_fec {
+                LostFlag::DecodeFec
+            } else {
+                LostFlag::NoLoss
+            };
+
+            let mut decoded_samples = 0;
+            while decoded_samples < frame_size {
+                // Call SILK decoder.
+                let first_frame = decoded_samples == 0;
+                if let Err(err) = self.silk_dec.decode(
+                    &mut dec,
+                    &self.silk_buffer[decoded_samples * self.channels as usize..],
+                    &mut silk_frame_size,
+                    lost_flag,
+                    first_frame,
+                ) {
+                    // PLC failure should not be fatal.
+                    if lost_flag != LostFlag::NoLoss {
+                        silk_frame_size = frame_size;
+                        (0..frame_size * self.channels as usize)
+                            .into_iter()
+                            .for_each(|i| {
+                                self.silk_buffer[i] = 0.0;
+                            });
+                    } else {
+                        return Err(err);
+                    }
+                }
+                decoded_samples += silk_frame_size;
+            }
+        }
+
+        if !decode_fec && mode != Some(CodecMode::CeltOnly) {
+            if let Some(dec) = dec.as_mut() {
+                if dec.tell() + 17 + 20 * (self.mode == Some(CodecMode::Hybrid)) as u32 <= 8 * len {
+                    // Check if we have a redundant 0-8 kHz band.
+                    if mode == Some(CodecMode::Hybrid) {
+                        redundancy = dec.decode_bit_logp(12);
+                    } else {
+                        redundancy = true;
+                    }
+
+                    if redundancy {
+                        celt_to_silk = dec.decode_bit_logp(1);
+                        // redundancy_bytes will be at least two, in the non-hybrid case due to the ec_tell() check above.
+                        redundancy_bytes = if mode == Some(CodecMode::Hybrid) {
+                            dec.decode_uint(256) + 2
+                        } else {
+                            len as u32 - ((dec.tell() + 7) >> 3)
+                        };
+                        len -= redundancy_bytes;
+                        // This is a sanity check. It should never happen for a valid packet, so the exact behaviour is not normative.
+                        if len * 8 < dec.tell() {
+                            len = 0;
+                            redundancy_bytes = 0;
+                            redundancy = false;
+                        }
+                        // Shrink decoder because of raw bits.
+                        dec.remove_storage(redundancy_bytes as usize);
+                    }
+                }
+            }
+        }
+
+        let start_band = if mode != Some(CodecMode::CeltOnly) {
+            17
+        } else {
+            0
+        };
+
+        if redundancy {
+            transition = false;
+            pcm_transition_silk_size = None;
+        }
+
+        if let Some(size) = pcm_transition_silk_size {
+            if size > self.transition_buffer.len() {
+                self.transition_buffer.resize(size, 0_f32);
+            }
+        };
+
+        if transition && mode != Some(CodecMode::CeltOnly) {
+            self.decode_frame(
+                &None,
+                &mut SampleBuffer::Transition,
+                0,
+                usize::min(f5, audiosize),
+                false,
+            )?;
+        }
+
+        if let Some(bandwidth) = bandwidth {
+            let end_band = match bandwidth {
+                Bandwidth::Narrowband => 13,
+                Bandwidth::Mediumband | Bandwidth::Wideband => 17,
+                Bandwidth::Superwideband => 19,
+                Bandwidth::Fullband => 21,
+            };
+            self.celt_dec.set_end_band(end_band);
+        }
+        self.celt_dec.set_stream_channels(self.stream_channels);
+
+        if redundancy {
+            let size = f5 * self.channels as usize;
+            if size < self.redundant_audio.len() {
+                self.redundant_audio.resize(size, 0_f32);
+            }
+        }
+
+        // 5 ms redundant frame for CELT->SILK.
+        if redundancy && celt_to_silk {
+            self.celt_dec.set_start_band(0);
+            if let Some(packet) = packet {
+                self.celt_dec.decode(
+                    &Some(&packet[len as usize..]),
+                    redundancy_bytes as usize,
+                    &mut self.redundant_audio,
+                    f5,
+                    &mut dec,
+                );
+            }
+
+            redundant_range = self.celt_dec.final_range();
+        }
+
+        // MUST be after PLC.
+        self.celt_dec.set_start_band(start_band);
+
+        if mode != Some(CodecMode::SilkOnly) {
+            let celt_frame_size = usize::min(f20, frame_size);
+            // Make sure to discard any previous CELT state.
+            if mode != self.prev_mode && self.prev_mode.is_some() && !self.prev_redundancy {
+                self.celt_dec.reset()?;
+            }
+
+            let data = if decode_fec { &None } else { packet };
+
+            // Decode CELT.
+            match samples {
+                SampleBuffer::Extern(ref mut buf) => {
+                    self.celt_dec
+                        .decode(data, len as usize, buf, celt_frame_size, &mut dec);
+                }
+                SampleBuffer::Intern => {
+                    self.celt_dec.decode(
+                        data,
+                        len as usize,
+                        &mut self.output_buffer,
+                        celt_frame_size,
+                        &mut dec,
+                    );
+                }
+                SampleBuffer::Transition => {
+                    self.celt_dec.decode(
+                        data,
+                        len as usize,
+                        &mut self.transition_buffer,
+                        celt_frame_size,
+                        &mut dec,
+                    );
+                }
+            }
+        } else if self.prev_mode == Some(CodecMode::Hybrid)
+            && !(redundancy && celt_to_silk && self.prev_redundancy)
+        {
+            // For hybrid -> SILK transitions, we let the CELT MDCT do a fade-out by decoding a silence frame.
+            self.celt_dec.set_start_band(0);
+            let silence = [0xFF, 0xFF];
+            match samples {
+                SampleBuffer::Extern(ref mut buf) => {
+                    self.celt_dec
+                        .decode(&Some(&silence), 2, buf, f2_5, &mut dec);
+                }
+                SampleBuffer::Intern => {
+                    self.celt_dec.decode(
+                        &Some(&silence),
+                        2,
+                        &mut self.output_buffer,
+                        f2_5,
+                        &mut dec,
+                    );
+                }
+                SampleBuffer::Transition => {
+                    self.celt_dec.decode(
+                        &Some(&silence),
+                        2,
+                        &mut self.transition_buffer,
+                        f2_5,
+                        &mut dec,
+                    );
+                }
+            }
+        }
+
+        if mode != Some(CodecMode::CeltOnly) {
+            // This merges the CELT and SILK outputs.
+            match samples {
+                SampleBuffer::Extern(ref mut buf) => {
+                    (0..frame_size * self.channels as usize)
+                        .into_iter()
+                        .for_each(|i| {
+                            buf[i] += (1.0 / 32768.0) * self.silk_buffer[i];
+                        });
+                }
+                SampleBuffer::Intern => {
+                    (0..frame_size * self.channels as usize)
+                        .into_iter()
+                        .for_each(|i| {
+                            self.output_buffer[i] += (1.0 / 32768.0) * self.silk_buffer[i];
+                        });
+                }
+                SampleBuffer::Transition => {
+                    (0..frame_size * self.channels as usize)
+                        .into_iter()
+                        .for_each(|i| {
+                            self.transition_buffer[i] += (1.0 / 32768.0) * self.silk_buffer[i];
+                        });
+                }
+            }
+        }
+
+        // 5 ms redundant frame for SILK->CELT.
+        if redundancy && !celt_to_silk {
+            self.celt_dec.reset()?;
+            self.celt_dec.set_start_band(0);
+
+            if let Some(packet) = packet {
+                self.celt_dec.decode(
+                    &Some(&packet[len as usize..]),
+                    redundancy_bytes as usize,
+                    &mut self.redundant_audio,
+                    f5,
+                    &mut None,
+                );
+            }
+            redundant_range = self.celt_dec.final_range();
+
+            match samples {
+                SampleBuffer::Extern(ref mut buf) => {
+                    smooth_fade_into_in1(
+                        &mut buf[self.channels as usize * (frame_size - f2_5)..],
+                        &self.redundant_audio[self.channels as usize * f2_5..],
+                        f2_5,
+                        self.channels as usize,
+                        self.celt_dec.window(),
+                        self.sampling_rate as usize,
+                    );
+                }
+                SampleBuffer::Intern => {
+                    smooth_fade_into_in1(
+                        &mut self.output_buffer[self.channels as usize * (frame_size - f2_5)..],
+                        &self.redundant_audio[self.channels as usize * f2_5..],
+                        f2_5,
+                        self.channels as usize,
+                        self.celt_dec.window(),
+                        self.sampling_rate as usize,
+                    );
+                }
+                SampleBuffer::Transition => {
+                    smooth_fade_into_in1(
+                        &mut self.transition_buffer[self.channels as usize * (frame_size - f2_5)..],
+                        &self.redundant_audio[self.channels as usize * f2_5..],
+                        f2_5,
+                        self.channels as usize,
+                        self.celt_dec.window(),
+                        self.sampling_rate as usize,
+                    );
+                }
+            }
+        }
+
+        if redundancy && celt_to_silk {
+            match samples {
+                SampleBuffer::Extern(ref mut buf) => {
+                    (0..self.channels as usize).into_iter().for_each(|c| {
+                        (0..f2_5).into_iter().for_each(|i| {
+                            buf[self.channels as usize * i + c] =
+                                self.redundant_audio[self.channels as usize * i + c];
+                        });
+                    });
+                    smooth_fade_into_in1(
+                        &mut self.redundant_audio[self.channels as usize * f2_5..],
+                        &buf[self.channels as usize * f2_5..],
+                        f2_5,
+                        self.channels as usize,
+                        &self.celt_dec.window(),
+                        self.sampling_rate as usize,
+                    );
+                }
+                SampleBuffer::Intern => {
+                    (0..self.channels as usize).into_iter().for_each(|c| {
+                        (0..f2_5).into_iter().for_each(|i| {
+                            self.output_buffer[self.channels as usize * i + c] =
+                                self.redundant_audio[self.channels as usize * i + c];
+                        });
+                    });
+                    smooth_fade_into_in1(
+                        &mut self.redundant_audio[self.channels as usize * f2_5..],
+                        &self.output_buffer[self.channels as usize * f2_5..],
+                        f2_5,
+                        self.channels as usize,
+                        &self.celt_dec.window(),
+                        self.sampling_rate as usize,
+                    );
+                }
+                SampleBuffer::Transition => {
+                    (0..self.channels as usize).into_iter().for_each(|c| {
+                        (0..f2_5).into_iter().for_each(|i| {
+                            self.transition_buffer[self.channels as usize * i + c] =
+                                self.redundant_audio[self.channels as usize * i + c];
+                        });
+                    });
+                    smooth_fade_into_in1(
+                        &mut self.redundant_audio[self.channels as usize * f2_5..],
+                        &self.transition_buffer[self.channels as usize * f2_5..],
+                        f2_5,
+                        self.channels as usize,
+                        &self.celt_dec.window(),
+                        self.sampling_rate as usize,
+                    );
+                }
+            }
+        }
+
+        if transition {
+            if audiosize >= f5 {
+                match samples {
+                    SampleBuffer::Extern(ref mut buf) => {
+                        (0..self.channels as usize * f2_5)
+                            .into_iter()
+                            .for_each(|i| {
+                                buf[i] = self.transition_buffer[i];
+                            });
+                        smooth_fade_into_in2(
+                            &self.transition_buffer[self.channels as usize * f2_5..],
+                            &mut buf[self.channels as usize * f2_5..],
+                            f2_5,
+                            self.channels as usize,
+                            self.celt_dec.window(),
+                            self.sampling_rate as usize,
+                        );
+                    }
+                    SampleBuffer::Intern => {
+                        (0..self.channels as usize * f2_5)
+                            .into_iter()
+                            .for_each(|i| {
+                                self.output_buffer[i] = self.transition_buffer[i];
+                            });
+                        smooth_fade_into_in2(
+                            &self.transition_buffer[self.channels as usize * f2_5..],
+                            &mut self.output_buffer[self.channels as usize * f2_5..],
+                            f2_5,
+                            self.channels as usize,
+                            self.celt_dec.window(),
+                            self.sampling_rate as usize,
+                        );
+                    }
+                    SampleBuffer::Transition => {
+                        return Err(DecoderError::InternalError("unexpected sample buffer"))
+                    }
+                }
+            } else {
+                // Not enough time to do a clean transition, but we do it anyway
+                // This will not preserve amplitude perfectly and may introduce
+                // a bit of temporal aliasing, but it shouldn't be too bad and
+                // that's pretty much the best we can do. In any case, generating this
+                // transition it pretty silly in the first place.
+                match samples {
+                    SampleBuffer::Extern(ref mut buf) => {
+                        smooth_fade_into_in2(
+                            &self.transition_buffer,
+                            buf,
+                            f2_5,
+                            self.channels as usize,
+                            self.celt_dec.window(),
+                            self.sampling_rate as usize,
+                        );
+                    }
+                    SampleBuffer::Intern => {
+                        smooth_fade_into_in2(
+                            &self.transition_buffer,
+                            &mut self.output_buffer,
+                            f2_5,
+                            self.channels as usize,
+                            self.celt_dec.window(),
+                            self.sampling_rate as usize,
+                        );
+                    }
+                    SampleBuffer::Transition => {
+                        return Err(DecoderError::InternalError("unexpected sample buffer"))
+                    }
+                }
+            }
+        }
+
+        if self.decode_gain != 0 {
+            let gain = f32::exp2(6.48814081e-4 * self.decode_gain as f32);
+            match samples {
+                SampleBuffer::Extern(ref mut buf) => {
+                    (0..frame_size * self.channels as usize)
+                        .into_iter()
+                        .for_each(|i| {
+                            buf[i] *= gain;
+                        });
+                }
+                SampleBuffer::Intern => {
+                    (0..frame_size * self.channels as usize)
+                        .into_iter()
+                        .for_each(|i| {
+                            self.output_buffer[i] *= gain;
+                        });
+                }
+                SampleBuffer::Transition => {
+                    (0..frame_size * self.channels as usize)
+                        .into_iter()
+                        .for_each(|i| {
+                            self.transition_buffer[i] *= gain;
+                        });
+                }
+            }
+        }
+
+        // TODO Case 0 and case 2 might be the same case.
+        if len <= 1 {
+            self.final_range = 0;
+        } else if let Some(dec) = dec.as_ref() {
+            self.final_range = dec.range() ^ redundant_range;
+        } else {
+            self.final_range = 0;
+        }
+
+        self.prev_mode = mode;
+        self.prev_redundancy = redundancy && !celt_to_silk;
+
+        Ok(audiosize)
     }
 }
 
-fn smooth_fade(
-    in1: &[f32],
+fn smooth_fade_into_in1(
+    in1: &mut [f32],
     in2: &[f32],
-    out: &mut [f32],
     overlap: usize,
     channels: usize,
     window: &[f32],
-    sampling_size: usize,
+    sampling_rate: usize,
 ) {
-    let inc = 48000 / sampling_size;
+    let inc = 48000 / sampling_rate;
     (0..channels).into_iter().for_each(|c| {
         (0..overlap).into_iter().for_each(|i| {
             let w = window[i * inc] * window[i * inc];
-            out[c + i * channels] =
+            in1[c + i * channels] =
+                (w * in2[i * channels + c]) + ((1.0 - w) * in1[i * channels + c]);
+        });
+    });
+}
+
+fn smooth_fade_into_in2(
+    in1: &[f32],
+    in2: &mut [f32],
+    overlap: usize,
+    channels: usize,
+    window: &[f32],
+    sampling_rate: usize,
+) {
+    let inc = 48000 / sampling_rate;
+    (0..channels).into_iter().for_each(|c| {
+        (0..overlap).into_iter().for_each(|i| {
+            let w = window[i * inc] * window[i * inc];
+            in2[c + i * channels] =
                 (w * in2[i * channels + c]) + ((1.0 - w) * in1[i * channels + c]);
         });
     });

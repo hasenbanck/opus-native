@@ -124,8 +124,6 @@ pub enum SamplingRate {
 /// Audio bandwidth.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Bandwidth {
-    /// Automatic selection.
-    Auto,
     /// 4 kHz passband.
     Narrowband,
     /// 6 kHz passband.
@@ -183,11 +181,11 @@ impl From<u8> for Bandwidth {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CodecMode {
     /// Silk only.
-    Silk,
+    SilkOnly,
     /// Hybrid mode.
     Hybrid,
     /// Celt only.
-    Celt,
+    CeltOnly,
 }
 
 /// Returns the bandwidth of an Opus packet.
@@ -297,11 +295,11 @@ pub fn query_packet_sample_count(
 ///
 pub fn query_packet_codec_mode(packet: &[u8]) -> CodecMode {
     if packet[0] & 0x80 == 0x80 {
-        CodecMode::Celt
+        CodecMode::CeltOnly
     } else if packet[0] & 0x60 == 0x60 {
         CodecMode::Hybrid
     } else {
-        CodecMode::Silk
+        CodecMode::SilkOnly
     }
 }
 

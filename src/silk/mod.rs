@@ -1,3 +1,3 @@
-pub(crate) use decoder::SilkDecoder;
+pub(crate) use decoder::{LostFlag, SilkDecoder};
 
 mod decoder;

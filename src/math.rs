@@ -96,6 +96,7 @@ mod tests {
         }
     }
 
+    // TODO LOG2 and EXP2 had an approximation in the reference implementation, which we could benchmark against the standard Rust functions.
     #[test]
     fn test_log2() {
         let mut x: f32 = 0.001;
