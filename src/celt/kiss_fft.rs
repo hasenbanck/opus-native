@@ -1,5 +1,7 @@
 //! Implements the FFT used for the MDCT.
 
+use std::f32::consts::FRAC_1_SQRT_2;
+
 use crate::math::Complex;
 
 const MAX_FACTORS: usize = 8;
@@ -56,7 +58,6 @@ impl KissFft {
 
         let mut offset = 0;
         let mut offset2 = 0;
-        let tw = std::f32::consts::FRAC_1_SQRT_2;
 
         (0..n).into_iter().for_each(|_| {
             offset2 = offset + 4;
@@ -65,8 +66,8 @@ impl KissFft {
             data[offset2] = data[offset] - t;
             data[offset] += t;
 
-            t.r = (data[offset2 + 1].r + data[offset2 + 1].i) * tw;
-            t.i = (data[offset2 + 1].i - data[offset2 + 1].r) * tw;
+            t.r = (data[offset2 + 1].r + data[offset2 + 1].i) * FRAC_1_SQRT_2;
+            t.i = (data[offset2 + 1].i - data[offset2 + 1].r) * FRAC_1_SQRT_2;
             data[offset2 + 1] = data[offset + 1] - t;
             data[offset + 1] += t;
 
@@ -75,8 +76,8 @@ impl KissFft {
             data[offset2 + 2] = data[offset + 2] - t;
             data[offset + 2] += t;
 
-            t.r = (data[offset2 + 3].i - data[offset2 + 3].r) * tw;
-            t.i = (-(data[offset2 + 3].i + data[offset2 + 3].r)) * tw;
+            t.r = (data[offset2 + 3].i - data[offset2 + 3].r) * FRAC_1_SQRT_2;
+            t.i = (-(data[offset2 + 3].i + data[offset2 + 3].r)) * FRAC_1_SQRT_2;
             data[offset2 + 3] = data[offset + 3] - t;
             data[offset + 3] += t;
 

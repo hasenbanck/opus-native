@@ -1,6 +1,6 @@
 //! Implements the range encoder.
 use crate::encoder_error::EncoderError;
-use crate::math::Log;
+use crate::math::ilog;
 use crate::range_coder::{
     get_lapace_freq, Tell, CODE_BITS, CODE_BOT, CODE_SHIFT, CODE_TOP, SYM_BITS, SYM_MAX, UINT_BITS,
     WINDOW_SIZE,
@@ -264,7 +264,7 @@ impl<'e> RangeEncoder<'e> {
         // In order to optimize log(), it is undefined for the value 0.
         debug_assert!(ft > 1);
         ft -= 1;
-        let mut ftb = ft.ilog();
+        let mut ftb = ilog(ft);
         if ftb > UINT_BITS {
             ftb -= UINT_BITS;
             let ft1 = (ft >> ftb) + 1;
@@ -381,7 +381,7 @@ impl<'e> RangeEncoder<'e> {
     pub(crate) fn done(&mut self) -> Result<(), EncoderError> {
         // We output the minimum number of bits that ensures that the symbols encoded
         // thus far will be decoded correctly regardless of the bits that follow.
-        let mut l: i32 = (CODE_BITS - self.rng.ilog()) as i32;
+        let mut l: i32 = (CODE_BITS - ilog(self.rng)) as i32;
         let mut mask = (CODE_TOP - 1) >> l;
         let mut end = (self.val + mask) & !mask;
         if (end | mask) >= self.val + self.rng {

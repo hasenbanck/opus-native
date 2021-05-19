@@ -1,48 +1,23 @@
+use std::f32::consts::{LN_2, LOG2_E, PI};
 use std::mem::size_of;
 use std::ops::{Add, Mul, Sub};
 
-/// Commonly used logarithms on integer primitives.
-pub(crate) trait Log: Sized + Copy {
-    fn leading_zeros(self) -> u32;
-    fn bits(self) -> usize;
-
-    /// The minimum number of bits required to store a positive integer in binary, or 0 for a non-positive integer.
-    #[inline(always)]
-    fn ilog(self) -> u32 {
-        self.bits() as u32 - self.leading_zeros()
-    }
-}
-
-impl Log for u32 {
-    fn leading_zeros(self) -> u32 {
-        self.leading_zeros()
-    }
-
-    fn bits(self) -> usize {
-        size_of::<Self>() * 8
-    }
-}
-
-impl Log for i32 {
-    fn leading_zeros(self) -> u32 {
-        self.leading_zeros()
-    }
-
-    fn bits(self) -> usize {
-        size_of::<Self>() * 8
-    }
+/// The minimum number of bits required to store a positive integer in binary, or 0 for a non-positive integer.
+#[inline(always)]
+pub(crate) fn ilog(x: u32) -> u32 {
+    (size_of::<u32>() * 8) as u32 - x.leading_zeros()
 }
 
 /// Fast version for log2.
 #[inline(always)]
 pub(crate) fn fast_log2(x: f32) -> f32 {
-    x.ln() * std::f32::consts::LOG2_E
+    x.ln() * LOG2_E
 }
 
 /// Fast version for exp2.
 #[inline(always)]
 pub(crate) fn fast_exp2(x: f32) -> f32 {
-    (x * std::f32::consts::LN_2).exp()
+    (x * LN_2).exp()
 }
 
 /// Fast version for atan2.
@@ -52,7 +27,7 @@ pub(crate) fn fast_atan2(x: f32, y: f32) -> f32 {
     const A: f32 = 0.43157974;
     const B: f32 = 0.67848403;
     const C: f32 = 0.08595542;
-    const E: f32 = std::f32::consts::PI / 2.0;
+    const E: f32 = PI / 2.0;
 
     let x2 = x * x;
     let y2 = y * y;
@@ -84,8 +59,8 @@ pub(crate) fn bitexact_cos(x: i16) -> i16 {
 /// This is designed to be bit-exact on any platform.
 #[inline(always)]
 pub(crate) fn bitexact_log2tan(isin: i32, icos: i32) -> i32 {
-    let ls = isin.ilog() as i32;
-    let lc = icos.ilog() as i32;
+    let ls = ilog(isin as u32) as i32;
+    let lc = ilog(icos as u32) as i32;
 
     let icos = (icos << (15 - lc)) as i16;
     let isin = (isin << (15 - ls)) as i16;
