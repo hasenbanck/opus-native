@@ -660,12 +660,6 @@ impl DecoderInner {
             }
         }
 
-        let start_band = if mode != Some(CodecMode::CeltOnly) {
-            17
-        } else {
-            0
-        };
-
         if redundancy {
             pcm_transition_silk_size = None;
         }
@@ -713,7 +707,11 @@ impl DecoderInner {
         }
 
         // MUST be after PLC.
-        self.celt_dec.set_start_band(start_band);
+        if mode != Some(CodecMode::CeltOnly) {
+            self.celt_dec.set_start_band(17);
+        } else {
+            self.celt_dec.set_start_band(0);
+        };
 
         if mode != Some(CodecMode::SilkOnly) {
             let celt_frame_size = usize::min(f20, frame_size);
