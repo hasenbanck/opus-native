@@ -1,29 +1,80 @@
 use std::mem::size_of;
-
-use num_traits::{PrimInt, Zero};
+use std::ops::{Add, Mul, Sub};
 
 /// Commonly used logarithms on integer primitives.
-pub(crate) trait Log: PrimInt + Zero {
+pub(crate) trait Log: Sized + Copy {
+    fn leading_zeros(self) -> u32;
+    fn bits(self) -> usize;
+
     /// The minimum number of bits required to store a positive integer in binary, or 0 for a non-positive integer.
     #[inline(always)]
     fn ilog(self) -> u32 {
-        (size_of::<Self>() * 8) as u32 - self.leading_zeros()
-    }
-
-    /// Log base 2. Self needs to be > 0.
-    #[inline(always)]
-    fn log2(self) -> u32 {
-        debug_assert!(!self.is_zero());
-        self.ilog() - 1
+        self.bits() as u32 - self.leading_zeros()
     }
 }
 
-impl Log for u32 {}
+impl Log for u32 {
+    fn leading_zeros(self) -> u32 {
+        self.leading_zeros()
+    }
 
-impl Log for i32 {}
+    fn bits(self) -> usize {
+        size_of::<Self>() * 8
+    }
+}
+
+impl Log for i32 {
+    fn leading_zeros(self) -> u32 {
+        self.leading_zeros()
+    }
+
+    fn bits(self) -> usize {
+        size_of::<Self>() * 8
+    }
+}
+
+/// Fast version for log2.
+#[inline(always)]
+pub(crate) fn fast_log2(x: f32) -> f32 {
+    x.ln() * std::f32::consts::LOG2_E
+}
+
+/// Fast version for exp2.
+#[inline(always)]
+pub(crate) fn fast_exp2(x: f32) -> f32 {
+    (x * std::f32::consts::LN_2).exp()
+}
+
+/// Fast version for atan2.
+#[allow(clippy::excessive_precision)]
+#[inline(always)]
+pub(crate) fn fast_atan2(x: f32, y: f32) -> f32 {
+    const A: f32 = 0.43157974;
+    const B: f32 = 0.67848403;
+    const C: f32 = 0.08595542;
+    const E: f32 = std::f32::consts::PI / 2.0;
+
+    let x2 = x * x;
+    let y2 = y * y;
+
+    // For very small values, we don't care about the answer, so we can just return 0.
+    if x2 + y2 < 1e-18 {
+        return 0.0;
+    }
+
+    if x2 < y2 {
+        let den = (y2 + B * x2) * (y2 + C * x2);
+        -x * y * (y2 + A * x2) / den + (if y < 0.0 { -E } else { E })
+    } else {
+        let den = (x2 + B * y2) * (x2 + C * y2);
+        x * y * (x2 + A * y2) / den + (if y < 0.0 { -E } else { E })
+            - (if x * y < 0.0 { -E } else { E })
+    }
+}
 
 /// This is a cos() approximation designed to be bit-exact on any platform. Bit exactness
 /// with this approximation is important because it has an impact on the bit allocation.
+#[inline(always)]
 pub(crate) fn bitexact_cos(x: i16) -> i16 {
     let x2 = i32::from(x) * i32::from(x);
     let y = ((x2 + 4096) >> 13) as i16;
@@ -48,6 +99,89 @@ pub(crate) fn bitexact_log2tan(isin: i32, icos: i32) -> i32 {
 fn frac_mul16(rhs: i16, lhs: i16) -> i16 {
     let x = i32::from(rhs) * i32::from(lhs);
     ((16384 + x) >> 15) as i16
+}
+
+/// Custom complex number implementation.
+#[derive(Clone, Copy, Default, Debug)]
+pub(crate) struct Complex {
+    pub(crate) r: f32,
+    pub(crate) i: f32,
+}
+
+impl std::ops::Sub<Complex> for Complex {
+    type Output = Self;
+
+    #[inline(always)]
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self::Output {
+            r: self.r - rhs.r,
+            i: self.i - rhs.i,
+        }
+    }
+}
+
+impl std::ops::Add<Complex> for Complex {
+    type Output = Self;
+
+    #[inline(always)]
+    fn add(self, rhs: Complex) -> Self::Output {
+        Self::Output {
+            r: self.r + rhs.r,
+            i: self.i + rhs.i,
+        }
+    }
+}
+
+impl std::ops::AddAssign for Complex {
+    #[inline(always)]
+    fn add_assign(&mut self, rhs: Self) {
+        self.r += rhs.r;
+        self.i += rhs.i;
+    }
+}
+
+impl std::ops::Mul<Complex> for Complex {
+    type Output = Self;
+
+    #[inline(always)]
+    fn mul(self, rhs: Self) -> Self::Output {
+        // (a+bi)(c+di) = (ac−bd) + (ad+bc)i
+        let r = self.r * rhs.r - self.i * rhs.i;
+        let i = self.r * rhs.i + self.i * rhs.r;
+        Self::Output { r, i }
+    }
+}
+
+impl std::ops::MulAssign<Complex> for Complex {
+    #[inline(always)]
+    fn mul_assign(&mut self, rhs: Complex) {
+        let tmp = self.r;
+
+        self.r *= rhs.r;
+        self.r -= self.i * rhs.i;
+
+        self.i *= rhs.r;
+        self.i += tmp * rhs.i;
+    }
+}
+
+impl std::ops::Mul<f32> for Complex {
+    type Output = Self;
+
+    #[inline(always)]
+    fn mul(self, rhs: f32) -> Self::Output {
+        let r = self.r * rhs;
+        let i = self.i * rhs;
+        Self::Output { r, i }
+    }
+}
+
+impl std::ops::MulAssign<f32> for Complex {
+    #[inline(always)]
+    fn mul_assign(&mut self, rhs: f32) {
+        self.r = self.r * rhs;
+        self.i = self.i * rhs;
+    }
 }
 
 #[cfg(test)]
@@ -96,12 +230,11 @@ mod tests {
         }
     }
 
-    // TODO LOG2 and EXP2 had an approximation in the reference implementation, which we could benchmark against the standard Rust functions.
     #[test]
     fn test_log2() {
         let mut x: f32 = 0.001;
         while x < 1677700.0 {
-            let error = ((LOG2_E * x.ln()) - x.log2()).abs();
+            let error = ((LOG2_E * x.ln()) - fast_log2(x)).abs();
             assert!(error <= 0.0009, "x = {}, error = {}", x, error);
             x += x / 8.0;
         }
@@ -111,7 +244,7 @@ mod tests {
     fn test_exp2() {
         let mut x: f32 = -11.0;
         while x < 24.0 {
-            let error = (x - LOG2_E * (x.exp2()).ln()).abs();
+            let error = (x - LOG2_E * (fast_exp2(x)).ln()).abs();
             assert!(error <= 0.0002, "x = {}, error = {}", x, error);
             x += 0.0007;
         }
@@ -121,7 +254,7 @@ mod tests {
     fn test_exp2log2() {
         let mut x: f32 = -11.0;
         while x < 24.0 {
-            let error = (x - (x.exp2()).log2()).abs();
+            let error = (x - fast_log2(fast_exp2(x))).abs();
             assert!(error <= 0.001, "x = {}, error = {}", x, error);
             x += 0.0007;
         }

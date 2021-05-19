@@ -1,9 +1,7 @@
 //! Implements the modified discrete cosine transform.
 
-use num_complex::Complex32;
-use num_traits::Zero;
-
 use crate::celt::FFT_CONFIGURATION;
+use crate::math::Complex;
 
 /// This is a simple MDCT implementation that uses a N/4 complex FFT
 /// to do most of the work. It should be relatively straightforward to
@@ -20,7 +18,7 @@ pub(crate) struct Mdct {
     /// Float scratch pad.
     spf: Vec<f32>,
     /// Complex scratch pad.
-    spc: Vec<Complex32>,
+    spc: Vec<Complex>,
 }
 
 const N: usize = 1920;
@@ -58,7 +56,7 @@ impl Mdct {
             self.spf.resize(n2, 0.0);
         }
         if self.spc.len() < n4 {
-            self.spc.resize(n4, Complex32::zero());
+            self.spc.resize(n4, Complex::default());
         }
 
         // Consider the input to be composed of four blocks: [a, b, c, d]
@@ -118,7 +116,7 @@ impl Mdct {
         // Pre-rotation
         {
             let mut sp = 0;
-            let mut tmp = Complex32::zero();
+            let mut tmp = Complex::default();
 
             (0..n4).into_iter().for_each(|i| {
                 let t0 = TRIG[trigp + i];
@@ -126,8 +124,8 @@ impl Mdct {
                 let re = self.spf[sp];
                 let im = self.spf[sp + 1];
 
-                tmp.re = (re * t0) - (im * t1);
-                tmp.im = (im * t0) + (re * t1);
+                tmp.r = (re * t0) - (im * t1);
+                tmp.i = (im * t0) + (re * t1);
                 tmp *= fft.scale;
                 self.spc[usize::from(fft.bitrev[i])] = tmp;
 
@@ -145,9 +143,9 @@ impl Mdct {
 
             (0..n4).into_iter().for_each(|i| {
                 output[op0] =
-                    (self.spc[sp].im * TRIG[trigp + n4 + i]) - (self.spc[sp].re * TRIG[trigp + i]);
+                    (self.spc[sp].i * TRIG[trigp + n4 + i]) - (self.spc[sp].r * TRIG[trigp + i]);
                 output[op1] =
-                    (self.spc[sp].re * TRIG[trigp + n4 + i]) + (self.spc[sp].im * TRIG[trigp + i]);
+                    (self.spc[sp].r * TRIG[trigp + n4 + i]) + (self.spc[sp].i * TRIG[trigp + i]);
 
                 sp += 1;
                 op0 += 2 * stride;
@@ -177,7 +175,7 @@ impl Mdct {
         let n4 = n >> 2;
 
         if self.spc.len() < n4 {
-            self.spc.resize(n4, Complex32::zero())
+            self.spc.resize(n4, Complex::default())
         }
 
         let fft = &FFT_CONFIGURATION[shift];
@@ -192,8 +190,8 @@ impl Mdct {
                 let im = (input[ip0] * TRIG[trigp + i]) - (input[ip1] * TRIG[trigp + n4 + i]);
 
                 // We swap real and imag because we use an FFT instead of an IFFT.
-                self.spc[usize::from(*rev)].re = im;
-                self.spc[usize::from(*rev)].im = re;
+                self.spc[usize::from(*rev)].r = im;
+                self.spc[usize::from(*rev)].i = re;
 
                 // Storing the pre-rotation directly in the bitrev order.
                 ip0 += 2 * stride;
@@ -219,7 +217,7 @@ impl Mdct {
                     let t1 = TRIG[trigp + n4 + i];
 
                     // We swap real and imag because we're using an FFT instead of an IFFT.
-                    *x = (c.im * t0) + (c.re * t1);
+                    *x = (c.i * t0) + (c.r * t1);
                 });
 
             // Odd fields.
@@ -235,7 +233,7 @@ impl Mdct {
                     let t1 = TRIG[trigp + n2 - i - 1];
 
                     // We swap real and imag because we're using an FFT instead of an IFFT.
-                    *x = (c.im * t1) - (c.re * t0);
+                    *x = (c.i * t1) - (c.r * t0);
                 });
         }
 

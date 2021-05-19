@@ -1,7 +1,6 @@
 //! Implements the FFT used for the MDCT.
 
-use num_complex::Complex32;
-use num_traits::Zero;
+use crate::math::Complex;
 
 const MAX_FACTORS: usize = 8;
 
@@ -15,12 +14,12 @@ pub(crate) struct KissFft {
     pub(crate) shift: usize,
     pub(crate) factors: [usize; 2 * MAX_FACTORS],
     pub(crate) bitrev: &'static [u16],
-    pub(crate) twiddles: &'static [Complex32],
+    pub(crate) twiddles: &'static [Complex],
 }
 
 impl KissFft {
     /// N/4 complex FFT.
-    pub(crate) fn process(&self, data: &mut [Complex32]) {
+    pub(crate) fn process(&self, data: &mut [Complex]) {
         let mut strides = [0_usize; MAX_FACTORS];
         strides[0] = 1;
 
@@ -51,7 +50,7 @@ impl KissFft {
         });
     }
 
-    fn butterfly2(&self, data: &mut [Complex32], m: usize, n: usize) {
+    fn butterfly2(&self, data: &mut [Complex], m: usize, n: usize) {
         // We know that m==4 here because the radix-2 is just after a radix-4.
         debug_assert!(m == 4);
 
@@ -66,18 +65,18 @@ impl KissFft {
             data[offset2] = data[offset] - t;
             data[offset] += t;
 
-            t.re = (data[offset2 + 1].re + data[offset2 + 1].im) * tw;
-            t.im = (data[offset2 + 1].im - data[offset2 + 1].re) * tw;
+            t.r = (data[offset2 + 1].r + data[offset2 + 1].i) * tw;
+            t.i = (data[offset2 + 1].i - data[offset2 + 1].r) * tw;
             data[offset2 + 1] = data[offset + 1] - t;
             data[offset + 1] += t;
 
-            t.re = data[offset2 + 2].im;
-            t.im = -data[offset2 + 2].re;
+            t.r = data[offset2 + 2].i;
+            t.i = -data[offset2 + 2].r;
             data[offset2 + 2] = data[offset + 2] - t;
             data[offset + 2] += t;
 
-            t.re = (data[offset2 + 3].im - data[offset2 + 3].re) * tw;
-            t.im = (-(data[offset2 + 3].im + data[offset2 + 3].re)) * tw;
+            t.r = (data[offset2 + 3].i - data[offset2 + 3].r) * tw;
+            t.i = (-(data[offset2 + 3].i + data[offset2 + 3].r)) * tw;
             data[offset2 + 3] = data[offset + 3] - t;
             data[offset + 3] += t;
 
@@ -85,11 +84,11 @@ impl KissFft {
         });
     }
 
-    fn butterfly3(&self, data: &mut [Complex32], stride: usize, m: usize, n: usize, mm: usize) {
+    fn butterfly3(&self, data: &mut [Complex], stride: usize, m: usize, n: usize, mm: usize) {
         // m is guaranteed to be a multiple of 4.
         debug_assert!(m % 4 == 0);
 
-        let mut scratch = [Complex32::zero(); 5];
+        let mut scratch = [Complex::default(); 5];
         let m2 = 2 * m;
         let epi3 = self.twiddles[stride * m];
 
@@ -109,22 +108,22 @@ impl KissFft {
 
                 data[offset + m] = data[offset] - (scratch[3] * 0.5);
 
-                scratch[0] *= epi3.im;
+                scratch[0] *= epi3.i;
 
                 data[offset] += scratch[3];
 
-                data[offset + m2].re = data[offset + m].re + scratch[0].im;
-                data[offset + m2].im = data[offset + m].im - scratch[0].re;
+                data[offset + m2].r = data[offset + m].r + scratch[0].i;
+                data[offset + m2].i = data[offset + m].i - scratch[0].r;
 
-                data[offset + m].re -= scratch[0].im;
-                data[offset + m].im += scratch[0].re;
+                data[offset + m].r -= scratch[0].i;
+                data[offset + m].i += scratch[0].r;
 
                 offset += 1;
             });
         });
     }
 
-    fn butterfly4(&self, data: &mut [Complex32], stride: usize, m: usize, n: usize, mm: usize) {
+    fn butterfly4(&self, data: &mut [Complex], stride: usize, m: usize, n: usize, mm: usize) {
         if m == 1 {
             let mut offset = 0;
 
@@ -139,10 +138,10 @@ impl KissFft {
 
                 let scratch1 = data[offset + 1] - data[offset + 3];
 
-                data[offset + 1].re = scratch0.re + scratch1.im;
-                data[offset + 1].im = scratch0.im - scratch1.re;
-                data[offset + 3].re = scratch0.re - scratch1.im;
-                data[offset + 3].im = scratch0.im + scratch1.re;
+                data[offset + 1].r = scratch0.r + scratch1.i;
+                data[offset + 1].i = scratch0.i - scratch1.r;
+                data[offset + 3].r = scratch0.r - scratch1.i;
+                data[offset + 3].i = scratch0.i + scratch1.r;
 
                 offset += 4;
             });
@@ -152,7 +151,7 @@ impl KissFft {
 
             let m2 = 2 * m;
             let m3 = 3 * m;
-            let mut scratch = [Complex32::zero(); 6];
+            let mut scratch = [Complex::default(); 6];
 
             (0..n).into_iter().for_each(|i| {
                 let mut offset = i * mm;
@@ -175,10 +174,10 @@ impl KissFft {
                     tw3_offset += stride * 3;
                     data[offset] += scratch[3];
 
-                    data[offset + m].re = scratch[5].re + scratch[4].im;
-                    data[offset + m].im = scratch[5].im - scratch[4].re;
-                    data[offset + m3].re = scratch[5].re - scratch[4].im;
-                    data[offset + m3].im = scratch[5].im + scratch[4].re;
+                    data[offset + m].r = scratch[5].r + scratch[4].i;
+                    data[offset + m].i = scratch[5].i - scratch[4].r;
+                    data[offset + m3].r = scratch[5].r - scratch[4].i;
+                    data[offset + m3].i = scratch[5].i + scratch[4].r;
 
                     offset += 1;
                 });
@@ -186,11 +185,11 @@ impl KissFft {
         }
     }
 
-    fn butterfly5(&self, data: &mut [Complex32], stride: usize, m: usize, n: usize, mm: usize) {
+    fn butterfly5(&self, data: &mut [Complex], stride: usize, m: usize, n: usize, mm: usize) {
         // m is guaranteed to be a multiple of 4.
         debug_assert!(m % 4 == 0);
 
-        let mut scratch = [Complex32::zero(); 13];
+        let mut scratch = [Complex::default(); 13];
         let ya = self.twiddles[stride * m];
         let yb = self.twiddles[stride * 2 * m];
 
@@ -215,19 +214,19 @@ impl KissFft {
 
                 data[offset0] += scratch[7] + scratch[8];
 
-                scratch[5].re = scratch[0].re + (scratch[7].re * ya.re + scratch[8].re * yb.re);
-                scratch[5].im = scratch[0].im + (scratch[7].im * ya.re + scratch[8].im * yb.re);
+                scratch[5].r = scratch[0].r + (scratch[7].r * ya.r + scratch[8].r * yb.r);
+                scratch[5].i = scratch[0].i + (scratch[7].i * ya.r + scratch[8].i * yb.r);
 
-                scratch[6].re = scratch[10].im * ya.im + scratch[9].im * yb.im;
-                scratch[6].im = -(scratch[10].re * ya.im + scratch[9].re * yb.im);
+                scratch[6].r = scratch[10].i * ya.i + scratch[9].i * yb.i;
+                scratch[6].i = -(scratch[10].r * ya.i + scratch[9].r * yb.i);
 
                 data[offset1] = scratch[5] - scratch[6];
                 data[offset4] = scratch[5] + scratch[6];
 
-                scratch[11].re = scratch[0].re + (scratch[7].re * yb.re + scratch[8].re * ya.re);
-                scratch[11].im = scratch[0].im + (scratch[7].im * yb.re + scratch[8].im * ya.re);
-                scratch[12].re = scratch[9].im * ya.im - scratch[10].im * yb.im;
-                scratch[12].im = scratch[10].re * yb.im - scratch[9].re * ya.im;
+                scratch[11].r = scratch[0].r + (scratch[7].r * yb.r + scratch[8].r * ya.r);
+                scratch[11].i = scratch[0].i + (scratch[7].i * yb.r + scratch[8].i * ya.r);
+                scratch[12].r = scratch[9].i * ya.i - scratch[10].i * yb.i;
+                scratch[12].i = scratch[10].r * yb.i - scratch[9].r * ya.i;
 
                 data[offset2] = scratch[11] + scratch[12];
                 data[offset3] = scratch[11] - scratch[12];
@@ -338,247 +337,247 @@ const BITREV_60: &[u16] = &[
 #[rustfmt::skip]
 #[allow(clippy::approx_constant)]
 #[allow(clippy::excessive_precision)]
-const TWIDDLES_480000_960: &[Complex32] = &[
-    Complex32 { re: 1.0000000, im: -0.0000000 }, Complex32 { re: 0.99991433, im: -0.013089596 },
-    Complex32 { re: 0.99965732, im: -0.026176948 }, Complex32 { re: 0.99922904, im: -0.039259816 },
-    Complex32 { re: 0.99862953, im: -0.052335956 }, Complex32 { re: 0.99785892, im: -0.065403129 },
-    Complex32 { re: 0.99691733, im: -0.078459096 }, Complex32 { re: 0.99580493, im: -0.091501619 },
-    Complex32 { re: 0.99452190, im: -0.10452846 }, Complex32 { re: 0.99306846, im: -0.11753740 },
-    Complex32 { re: 0.99144486, im: -0.13052619 }, Complex32 { re: 0.98965139, im: -0.14349262 },
-    Complex32 { re: 0.98768834, im: -0.15643447 }, Complex32 { re: 0.98555606, im: -0.16934950 },
-    Complex32 { re: 0.98325491, im: -0.18223553 }, Complex32 { re: 0.98078528, im: -0.19509032 },
-    Complex32 { re: 0.97814760, im: -0.20791169 }, Complex32 { re: 0.97534232, im: -0.22069744 },
-    Complex32 { re: 0.97236992, im: -0.23344536 }, Complex32 { re: 0.96923091, im: -0.24615329 },
-    Complex32 { re: 0.96592583, im: -0.25881905 }, Complex32 { re: 0.96245524, im: -0.27144045 },
-    Complex32 { re: 0.95881973, im: -0.28401534 }, Complex32 { re: 0.95501994, im: -0.29654157 },
-    Complex32 { re: 0.95105652, im: -0.30901699 }, Complex32 { re: 0.94693013, im: -0.32143947 },
-    Complex32 { re: 0.94264149, im: -0.33380686 }, Complex32 { re: 0.93819134, im: -0.34611706 },
-    Complex32 { re: 0.93358043, im: -0.35836795 }, Complex32 { re: 0.92880955, im: -0.37055744 },
-    Complex32 { re: 0.92387953, im: -0.38268343 }, Complex32 { re: 0.91879121, im: -0.39474386 },
-    Complex32 { re: 0.91354546, im: -0.40673664 }, Complex32 { re: 0.90814317, im: -0.41865974 },
-    Complex32 { re: 0.90258528, im: -0.43051110 }, Complex32 { re: 0.89687274, im: -0.44228869 },
-    Complex32 { re: 0.89100652, im: -0.45399050 }, Complex32 { re: 0.88498764, im: -0.46561452 },
-    Complex32 { re: 0.87881711, im: -0.47715876 }, Complex32 { re: 0.87249601, im: -0.48862124 },
-    Complex32 { re: 0.86602540, im: -0.50000000 }, Complex32 { re: 0.85940641, im: -0.51129309 },
-    Complex32 { re: 0.85264016, im: -0.52249856 }, Complex32 { re: 0.84572782, im: -0.53361452 },
-    Complex32 { re: 0.83867057, im: -0.54463904 }, Complex32 { re: 0.83146961, im: -0.55557023 },
-    Complex32 { re: 0.82412619, im: -0.56640624 }, Complex32 { re: 0.81664156, im: -0.57714519 },
-    Complex32 { re: 0.80901699, im: -0.58778525 }, Complex32 { re: 0.80125381, im: -0.59832460 },
-    Complex32 { re: 0.79335334, im: -0.60876143 }, Complex32 { re: 0.78531693, im: -0.61909395 },
-    Complex32 { re: 0.77714596, im: -0.62932039 }, Complex32 { re: 0.76884183, im: -0.63943900 },
-    Complex32 { re: 0.76040597, im: -0.64944805 }, Complex32 { re: 0.75183981, im: -0.65934582 },
-    Complex32 { re: 0.74314483, im: -0.66913061 }, Complex32 { re: 0.73432251, im: -0.67880075 },
-    Complex32 { re: 0.72537437, im: -0.68835458 }, Complex32 { re: 0.71630194, im: -0.69779046 },
-    Complex32 { re: 0.70710678, im: -0.70710678 }, Complex32 { re: 0.69779046, im: -0.71630194 },
-    Complex32 { re: 0.68835458, im: -0.72537437 }, Complex32 { re: 0.67880075, im: -0.73432251 },
-    Complex32 { re: 0.66913061, im: -0.74314483 }, Complex32 { re: 0.65934582, im: -0.75183981 },
-    Complex32 { re: 0.64944805, im: -0.76040597 }, Complex32 { re: 0.63943900, im: -0.76884183 },
-    Complex32 { re: 0.62932039, im: -0.77714596 }, Complex32 { re: 0.61909395, im: -0.78531693 },
-    Complex32 { re: 0.60876143, im: -0.79335334 }, Complex32 { re: 0.59832460, im: -0.80125381 },
-    Complex32 { re: 0.58778525, im: -0.80901699 }, Complex32 { re: 0.57714519, im: -0.81664156 },
-    Complex32 { re: 0.56640624, im: -0.82412619 }, Complex32 { re: 0.55557023, im: -0.83146961 },
-    Complex32 { re: 0.54463904, im: -0.83867057 }, Complex32 { re: 0.53361452, im: -0.84572782 },
-    Complex32 { re: 0.52249856, im: -0.85264016 }, Complex32 { re: 0.51129309, im: -0.85940641 },
-    Complex32 { re: 0.50000000, im: -0.86602540 }, Complex32 { re: 0.48862124, im: -0.87249601 },
-    Complex32 { re: 0.47715876, im: -0.87881711 }, Complex32 { re: 0.46561452, im: -0.88498764 },
-    Complex32 { re: 0.45399050, im: -0.89100652 }, Complex32 { re: 0.44228869, im: -0.89687274 },
-    Complex32 { re: 0.43051110, im: -0.90258528 }, Complex32 { re: 0.41865974, im: -0.90814317 },
-    Complex32 { re: 0.40673664, im: -0.91354546 }, Complex32 { re: 0.39474386, im: -0.91879121 },
-    Complex32 { re: 0.38268343, im: -0.92387953 }, Complex32 { re: 0.37055744, im: -0.92880955 },
-    Complex32 { re: 0.35836795, im: -0.93358043 }, Complex32 { re: 0.34611706, im: -0.93819134 },
-    Complex32 { re: 0.33380686, im: -0.94264149 }, Complex32 { re: 0.32143947, im: -0.94693013 },
-    Complex32 { re: 0.30901699, im: -0.95105652 }, Complex32 { re: 0.29654157, im: -0.95501994 },
-    Complex32 { re: 0.28401534, im: -0.95881973 }, Complex32 { re: 0.27144045, im: -0.96245524 },
-    Complex32 { re: 0.25881905, im: -0.96592583 }, Complex32 { re: 0.24615329, im: -0.96923091 },
-    Complex32 { re: 0.23344536, im: -0.97236992 }, Complex32 { re: 0.22069744, im: -0.97534232 },
-    Complex32 { re: 0.20791169, im: -0.97814760 }, Complex32 { re: 0.19509032, im: -0.98078528 },
-    Complex32 { re: 0.18223553, im: -0.98325491 }, Complex32 { re: 0.16934950, im: -0.98555606 },
-    Complex32 { re: 0.15643447, im: -0.98768834 }, Complex32 { re: 0.14349262, im: -0.98965139 },
-    Complex32 { re: 0.13052619, im: -0.99144486 }, Complex32 { re: 0.11753740, im: -0.99306846 },
-    Complex32 { re: 0.10452846, im: -0.99452190 }, Complex32 { re: 0.091501619, im: -0.99580493 },
-    Complex32 { re: 0.078459096, im: -0.99691733 }, Complex32 { re: 0.065403129, im: -0.99785892 },
-    Complex32 { re: 0.052335956, im: -0.99862953 }, Complex32 { re: 0.039259816, im: -0.99922904 },
-    Complex32 { re: 0.026176948, im: -0.99965732 }, Complex32 { re: 0.013089596, im: -0.99991433 },
-    Complex32 { re: 6.1230318e-17, im: -1.0000000 }, Complex32 { re: -0.013089596, im: -0.99991433 },
-    Complex32 { re: -0.026176948, im: -0.99965732 }, Complex32 { re: -0.039259816, im: -0.99922904 },
-    Complex32 { re: -0.052335956, im: -0.99862953 }, Complex32 { re: -0.065403129, im: -0.99785892 },
-    Complex32 { re: -0.078459096, im: -0.99691733 }, Complex32 { re: -0.091501619, im: -0.99580493 },
-    Complex32 { re: -0.10452846, im: -0.99452190 }, Complex32 { re: -0.11753740, im: -0.99306846 },
-    Complex32 { re: -0.13052619, im: -0.99144486 }, Complex32 { re: -0.14349262, im: -0.98965139 },
-    Complex32 { re: -0.15643447, im: -0.98768834 }, Complex32 { re: -0.16934950, im: -0.98555606 },
-    Complex32 { re: -0.18223553, im: -0.98325491 }, Complex32 { re: -0.19509032, im: -0.98078528 },
-    Complex32 { re: -0.20791169, im: -0.97814760 }, Complex32 { re: -0.22069744, im: -0.97534232 },
-    Complex32 { re: -0.23344536, im: -0.97236992 }, Complex32 { re: -0.24615329, im: -0.96923091 },
-    Complex32 { re: -0.25881905, im: -0.96592583 }, Complex32 { re: -0.27144045, im: -0.96245524 },
-    Complex32 { re: -0.28401534, im: -0.95881973 }, Complex32 { re: -0.29654157, im: -0.95501994 },
-    Complex32 { re: -0.30901699, im: -0.95105652 }, Complex32 { re: -0.32143947, im: -0.94693013 },
-    Complex32 { re: -0.33380686, im: -0.94264149 }, Complex32 { re: -0.34611706, im: -0.93819134 },
-    Complex32 { re: -0.35836795, im: -0.93358043 }, Complex32 { re: -0.37055744, im: -0.92880955 },
-    Complex32 { re: -0.38268343, im: -0.92387953 }, Complex32 { re: -0.39474386, im: -0.91879121 },
-    Complex32 { re: -0.40673664, im: -0.91354546 }, Complex32 { re: -0.41865974, im: -0.90814317 },
-    Complex32 { re: -0.43051110, im: -0.90258528 }, Complex32 { re: -0.44228869, im: -0.89687274 },
-    Complex32 { re: -0.45399050, im: -0.89100652 }, Complex32 { re: -0.46561452, im: -0.88498764 },
-    Complex32 { re: -0.47715876, im: -0.87881711 }, Complex32 { re: -0.48862124, im: -0.87249601 },
-    Complex32 { re: -0.50000000, im: -0.86602540 }, Complex32 { re: -0.51129309, im: -0.85940641 },
-    Complex32 { re: -0.52249856, im: -0.85264016 }, Complex32 { re: -0.53361452, im: -0.84572782 },
-    Complex32 { re: -0.54463904, im: -0.83867057 }, Complex32 { re: -0.55557023, im: -0.83146961 },
-    Complex32 { re: -0.56640624, im: -0.82412619 }, Complex32 { re: -0.57714519, im: -0.81664156 },
-    Complex32 { re: -0.58778525, im: -0.80901699 }, Complex32 { re: -0.59832460, im: -0.80125381 },
-    Complex32 { re: -0.60876143, im: -0.79335334 }, Complex32 { re: -0.61909395, im: -0.78531693 },
-    Complex32 { re: -0.62932039, im: -0.77714596 }, Complex32 { re: -0.63943900, im: -0.76884183 },
-    Complex32 { re: -0.64944805, im: -0.76040597 }, Complex32 { re: -0.65934582, im: -0.75183981 },
-    Complex32 { re: -0.66913061, im: -0.74314483 }, Complex32 { re: -0.67880075, im: -0.73432251 },
-    Complex32 { re: -0.68835458, im: -0.72537437 }, Complex32 { re: -0.69779046, im: -0.71630194 },
-    Complex32 { re: -0.70710678, im: -0.70710678 }, Complex32 { re: -0.71630194, im: -0.69779046 },
-    Complex32 { re: -0.72537437, im: -0.68835458 }, Complex32 { re: -0.73432251, im: -0.67880075 },
-    Complex32 { re: -0.74314483, im: -0.66913061 }, Complex32 { re: -0.75183981, im: -0.65934582 },
-    Complex32 { re: -0.76040597, im: -0.64944805 }, Complex32 { re: -0.76884183, im: -0.63943900 },
-    Complex32 { re: -0.77714596, im: -0.62932039 }, Complex32 { re: -0.78531693, im: -0.61909395 },
-    Complex32 { re: -0.79335334, im: -0.60876143 }, Complex32 { re: -0.80125381, im: -0.59832460 },
-    Complex32 { re: -0.80901699, im: -0.58778525 }, Complex32 { re: -0.81664156, im: -0.57714519 },
-    Complex32 { re: -0.82412619, im: -0.56640624 }, Complex32 { re: -0.83146961, im: -0.55557023 },
-    Complex32 { re: -0.83867057, im: -0.54463904 }, Complex32 { re: -0.84572782, im: -0.53361452 },
-    Complex32 { re: -0.85264016, im: -0.52249856 }, Complex32 { re: -0.85940641, im: -0.51129309 },
-    Complex32 { re: -0.86602540, im: -0.50000000 }, Complex32 { re: -0.87249601, im: -0.48862124 },
-    Complex32 { re: -0.87881711, im: -0.47715876 }, Complex32 { re: -0.88498764, im: -0.46561452 },
-    Complex32 { re: -0.89100652, im: -0.45399050 }, Complex32 { re: -0.89687274, im: -0.44228869 },
-    Complex32 { re: -0.90258528, im: -0.43051110 }, Complex32 { re: -0.90814317, im: -0.41865974 },
-    Complex32 { re: -0.91354546, im: -0.40673664 }, Complex32 { re: -0.91879121, im: -0.39474386 },
-    Complex32 { re: -0.92387953, im: -0.38268343 }, Complex32 { re: -0.92880955, im: -0.37055744 },
-    Complex32 { re: -0.93358043, im: -0.35836795 }, Complex32 { re: -0.93819134, im: -0.34611706 },
-    Complex32 { re: -0.94264149, im: -0.33380686 }, Complex32 { re: -0.94693013, im: -0.32143947 },
-    Complex32 { re: -0.95105652, im: -0.30901699 }, Complex32 { re: -0.95501994, im: -0.29654157 },
-    Complex32 { re: -0.95881973, im: -0.28401534 }, Complex32 { re: -0.96245524, im: -0.27144045 },
-    Complex32 { re: -0.96592583, im: -0.25881905 }, Complex32 { re: -0.96923091, im: -0.24615329 },
-    Complex32 { re: -0.97236992, im: -0.23344536 }, Complex32 { re: -0.97534232, im: -0.22069744 },
-    Complex32 { re: -0.97814760, im: -0.20791169 }, Complex32 { re: -0.98078528, im: -0.19509032 },
-    Complex32 { re: -0.98325491, im: -0.18223553 }, Complex32 { re: -0.98555606, im: -0.16934950 },
-    Complex32 { re: -0.98768834, im: -0.15643447 }, Complex32 { re: -0.98965139, im: -0.14349262 },
-    Complex32 { re: -0.99144486, im: -0.13052619 }, Complex32 { re: -0.99306846, im: -0.11753740 },
-    Complex32 { re: -0.99452190, im: -0.10452846 }, Complex32 { re: -0.99580493, im: -0.091501619 },
-    Complex32 { re: -0.99691733, im: -0.078459096 }, Complex32 { re: -0.99785892, im: -0.065403129 },
-    Complex32 { re: -0.99862953, im: -0.052335956 }, Complex32 { re: -0.99922904, im: -0.039259816 },
-    Complex32 { re: -0.99965732, im: -0.026176948 }, Complex32 { re: -0.99991433, im: -0.013089596 },
-    Complex32 { re: -1.0000000, im: -1.2246064e-16 }, Complex32 { re: -0.99991433, im: 0.013089596 },
-    Complex32 { re: -0.99965732, im: 0.026176948 }, Complex32 { re: -0.99922904, im: 0.039259816 },
-    Complex32 { re: -0.99862953, im: 0.052335956 }, Complex32 { re: -0.99785892, im: 0.065403129 },
-    Complex32 { re: -0.99691733, im: 0.078459096 }, Complex32 { re: -0.99580493, im: 0.091501619 },
-    Complex32 { re: -0.99452190, im: 0.10452846 }, Complex32 { re: -0.99306846, im: 0.11753740 },
-    Complex32 { re: -0.99144486, im: 0.13052619 }, Complex32 { re: -0.98965139, im: 0.14349262 },
-    Complex32 { re: -0.98768834, im: 0.15643447 }, Complex32 { re: -0.98555606, im: 0.16934950 },
-    Complex32 { re: -0.98325491, im: 0.18223553 }, Complex32 { re: -0.98078528, im: 0.19509032 },
-    Complex32 { re: -0.97814760, im: 0.20791169 }, Complex32 { re: -0.97534232, im: 0.22069744 },
-    Complex32 { re: -0.97236992, im: 0.23344536 }, Complex32 { re: -0.96923091, im: 0.24615329 },
-    Complex32 { re: -0.96592583, im: 0.25881905 }, Complex32 { re: -0.96245524, im: 0.27144045 },
-    Complex32 { re: -0.95881973, im: 0.28401534 }, Complex32 { re: -0.95501994, im: 0.29654157 },
-    Complex32 { re: -0.95105652, im: 0.30901699 }, Complex32 { re: -0.94693013, im: 0.32143947 },
-    Complex32 { re: -0.94264149, im: 0.33380686 }, Complex32 { re: -0.93819134, im: 0.34611706 },
-    Complex32 { re: -0.93358043, im: 0.35836795 }, Complex32 { re: -0.92880955, im: 0.37055744 },
-    Complex32 { re: -0.92387953, im: 0.38268343 }, Complex32 { re: -0.91879121, im: 0.39474386 },
-    Complex32 { re: -0.91354546, im: 0.40673664 }, Complex32 { re: -0.90814317, im: 0.41865974 },
-    Complex32 { re: -0.90258528, im: 0.43051110 }, Complex32 { re: -0.89687274, im: 0.44228869 },
-    Complex32 { re: -0.89100652, im: 0.45399050 }, Complex32 { re: -0.88498764, im: 0.46561452 },
-    Complex32 { re: -0.87881711, im: 0.47715876 }, Complex32 { re: -0.87249601, im: 0.48862124 },
-    Complex32 { re: -0.86602540, im: 0.50000000 }, Complex32 { re: -0.85940641, im: 0.51129309 },
-    Complex32 { re: -0.85264016, im: 0.52249856 }, Complex32 { re: -0.84572782, im: 0.53361452 },
-    Complex32 { re: -0.83867057, im: 0.54463904 }, Complex32 { re: -0.83146961, im: 0.55557023 },
-    Complex32 { re: -0.82412619, im: 0.56640624 }, Complex32 { re: -0.81664156, im: 0.57714519 },
-    Complex32 { re: -0.80901699, im: 0.58778525 }, Complex32 { re: -0.80125381, im: 0.59832460 },
-    Complex32 { re: -0.79335334, im: 0.60876143 }, Complex32 { re: -0.78531693, im: 0.61909395 },
-    Complex32 { re: -0.77714596, im: 0.62932039 }, Complex32 { re: -0.76884183, im: 0.63943900 },
-    Complex32 { re: -0.76040597, im: 0.64944805 }, Complex32 { re: -0.75183981, im: 0.65934582 },
-    Complex32 { re: -0.74314483, im: 0.66913061 }, Complex32 { re: -0.73432251, im: 0.67880075 },
-    Complex32 { re: -0.72537437, im: 0.68835458 }, Complex32 { re: -0.71630194, im: 0.69779046 },
-    Complex32 { re: -0.70710678, im: 0.70710678 }, Complex32 { re: -0.69779046, im: 0.71630194 },
-    Complex32 { re: -0.68835458, im: 0.72537437 }, Complex32 { re: -0.67880075, im: 0.73432251 },
-    Complex32 { re: -0.66913061, im: 0.74314483 }, Complex32 { re: -0.65934582, im: 0.75183981 },
-    Complex32 { re: -0.64944805, im: 0.76040597 }, Complex32 { re: -0.63943900, im: 0.76884183 },
-    Complex32 { re: -0.62932039, im: 0.77714596 }, Complex32 { re: -0.61909395, im: 0.78531693 },
-    Complex32 { re: -0.60876143, im: 0.79335334 }, Complex32 { re: -0.59832460, im: 0.80125381 },
-    Complex32 { re: -0.58778525, im: 0.80901699 }, Complex32 { re: -0.57714519, im: 0.81664156 },
-    Complex32 { re: -0.56640624, im: 0.82412619 }, Complex32 { re: -0.55557023, im: 0.83146961 },
-    Complex32 { re: -0.54463904, im: 0.83867057 }, Complex32 { re: -0.53361452, im: 0.84572782 },
-    Complex32 { re: -0.52249856, im: 0.85264016 }, Complex32 { re: -0.51129309, im: 0.85940641 },
-    Complex32 { re: -0.50000000, im: 0.86602540 }, Complex32 { re: -0.48862124, im: 0.87249601 },
-    Complex32 { re: -0.47715876, im: 0.87881711 }, Complex32 { re: -0.46561452, im: 0.88498764 },
-    Complex32 { re: -0.45399050, im: 0.89100652 }, Complex32 { re: -0.44228869, im: 0.89687274 },
-    Complex32 { re: -0.43051110, im: 0.90258528 }, Complex32 { re: -0.41865974, im: 0.90814317 },
-    Complex32 { re: -0.40673664, im: 0.91354546 }, Complex32 { re: -0.39474386, im: 0.91879121 },
-    Complex32 { re: -0.38268343, im: 0.92387953 }, Complex32 { re: -0.37055744, im: 0.92880955 },
-    Complex32 { re: -0.35836795, im: 0.93358043 }, Complex32 { re: -0.34611706, im: 0.93819134 },
-    Complex32 { re: -0.33380686, im: 0.94264149 }, Complex32 { re: -0.32143947, im: 0.94693013 },
-    Complex32 { re: -0.30901699, im: 0.95105652 }, Complex32 { re: -0.29654157, im: 0.95501994 },
-    Complex32 { re: -0.28401534, im: 0.95881973 }, Complex32 { re: -0.27144045, im: 0.96245524 },
-    Complex32 { re: -0.25881905, im: 0.96592583 }, Complex32 { re: -0.24615329, im: 0.96923091 },
-    Complex32 { re: -0.23344536, im: 0.97236992 }, Complex32 { re: -0.22069744, im: 0.97534232 },
-    Complex32 { re: -0.20791169, im: 0.97814760 }, Complex32 { re: -0.19509032, im: 0.98078528 },
-    Complex32 { re: -0.18223553, im: 0.98325491 }, Complex32 { re: -0.16934950, im: 0.98555606 },
-    Complex32 { re: -0.15643447, im: 0.98768834 }, Complex32 { re: -0.14349262, im: 0.98965139 },
-    Complex32 { re: -0.13052619, im: 0.99144486 }, Complex32 { re: -0.11753740, im: 0.99306846 },
-    Complex32 { re: -0.10452846, im: 0.99452190 }, Complex32 { re: -0.091501619, im: 0.99580493 },
-    Complex32 { re: -0.078459096, im: 0.99691733 }, Complex32 { re: -0.065403129, im: 0.99785892 },
-    Complex32 { re: -0.052335956, im: 0.99862953 }, Complex32 { re: -0.039259816, im: 0.99922904 },
-    Complex32 { re: -0.026176948, im: 0.99965732 }, Complex32 { re: -0.013089596, im: 0.99991433 },
-    Complex32 { re: -1.8369095e-16, im: 1.0000000 }, Complex32 { re: 0.013089596, im: 0.99991433 },
-    Complex32 { re: 0.026176948, im: 0.99965732 }, Complex32 { re: 0.039259816, im: 0.99922904 },
-    Complex32 { re: 0.052335956, im: 0.99862953 }, Complex32 { re: 0.065403129, im: 0.99785892 },
-    Complex32 { re: 0.078459096, im: 0.99691733 }, Complex32 { re: 0.091501619, im: 0.99580493 },
-    Complex32 { re: 0.10452846, im: 0.99452190 }, Complex32 { re: 0.11753740, im: 0.99306846 },
-    Complex32 { re: 0.13052619, im: 0.99144486 }, Complex32 { re: 0.14349262, im: 0.98965139 },
-    Complex32 { re: 0.15643447, im: 0.98768834 }, Complex32 { re: 0.16934950, im: 0.98555606 },
-    Complex32 { re: 0.18223553, im: 0.98325491 }, Complex32 { re: 0.19509032, im: 0.98078528 },
-    Complex32 { re: 0.20791169, im: 0.97814760 }, Complex32 { re: 0.22069744, im: 0.97534232 },
-    Complex32 { re: 0.23344536, im: 0.97236992 }, Complex32 { re: 0.24615329, im: 0.96923091 },
-    Complex32 { re: 0.25881905, im: 0.96592583 }, Complex32 { re: 0.27144045, im: 0.96245524 },
-    Complex32 { re: 0.28401534, im: 0.95881973 }, Complex32 { re: 0.29654157, im: 0.95501994 },
-    Complex32 { re: 0.30901699, im: 0.95105652 }, Complex32 { re: 0.32143947, im: 0.94693013 },
-    Complex32 { re: 0.33380686, im: 0.94264149 }, Complex32 { re: 0.34611706, im: 0.93819134 },
-    Complex32 { re: 0.35836795, im: 0.93358043 }, Complex32 { re: 0.37055744, im: 0.92880955 },
-    Complex32 { re: 0.38268343, im: 0.92387953 }, Complex32 { re: 0.39474386, im: 0.91879121 },
-    Complex32 { re: 0.40673664, im: 0.91354546 }, Complex32 { re: 0.41865974, im: 0.90814317 },
-    Complex32 { re: 0.43051110, im: 0.90258528 }, Complex32 { re: 0.44228869, im: 0.89687274 },
-    Complex32 { re: 0.45399050, im: 0.89100652 }, Complex32 { re: 0.46561452, im: 0.88498764 },
-    Complex32 { re: 0.47715876, im: 0.87881711 }, Complex32 { re: 0.48862124, im: 0.87249601 },
-    Complex32 { re: 0.50000000, im: 0.86602540 }, Complex32 { re: 0.51129309, im: 0.85940641 },
-    Complex32 { re: 0.52249856, im: 0.85264016 }, Complex32 { re: 0.53361452, im: 0.84572782 },
-    Complex32 { re: 0.54463904, im: 0.83867057 }, Complex32 { re: 0.55557023, im: 0.83146961 },
-    Complex32 { re: 0.56640624, im: 0.82412619 }, Complex32 { re: 0.57714519, im: 0.81664156 },
-    Complex32 { re: 0.58778525, im: 0.80901699 }, Complex32 { re: 0.59832460, im: 0.80125381 },
-    Complex32 { re: 0.60876143, im: 0.79335334 }, Complex32 { re: 0.61909395, im: 0.78531693 },
-    Complex32 { re: 0.62932039, im: 0.77714596 }, Complex32 { re: 0.63943900, im: 0.76884183 },
-    Complex32 { re: 0.64944805, im: 0.76040597 }, Complex32 { re: 0.65934582, im: 0.75183981 },
-    Complex32 { re: 0.66913061, im: 0.74314483 }, Complex32 { re: 0.67880075, im: 0.73432251 },
-    Complex32 { re: 0.68835458, im: 0.72537437 }, Complex32 { re: 0.69779046, im: 0.71630194 },
-    Complex32 { re: 0.70710678, im: 0.70710678 }, Complex32 { re: 0.71630194, im: 0.69779046 },
-    Complex32 { re: 0.72537437, im: 0.68835458 }, Complex32 { re: 0.73432251, im: 0.67880075 },
-    Complex32 { re: 0.74314483, im: 0.66913061 }, Complex32 { re: 0.75183981, im: 0.65934582 },
-    Complex32 { re: 0.76040597, im: 0.64944805 }, Complex32 { re: 0.76884183, im: 0.63943900 },
-    Complex32 { re: 0.77714596, im: 0.62932039 }, Complex32 { re: 0.78531693, im: 0.61909395 },
-    Complex32 { re: 0.79335334, im: 0.60876143 }, Complex32 { re: 0.80125381, im: 0.59832460 },
-    Complex32 { re: 0.80901699, im: 0.58778525 }, Complex32 { re: 0.81664156, im: 0.57714519 },
-    Complex32 { re: 0.82412619, im: 0.56640624 }, Complex32 { re: 0.83146961, im: 0.55557023 },
-    Complex32 { re: 0.83867057, im: 0.54463904 }, Complex32 { re: 0.84572782, im: 0.53361452 },
-    Complex32 { re: 0.85264016, im: 0.52249856 }, Complex32 { re: 0.85940641, im: 0.51129309 },
-    Complex32 { re: 0.86602540, im: 0.50000000 }, Complex32 { re: 0.87249601, im: 0.48862124 },
-    Complex32 { re: 0.87881711, im: 0.47715876 }, Complex32 { re: 0.88498764, im: 0.46561452 },
-    Complex32 { re: 0.89100652, im: 0.45399050 }, Complex32 { re: 0.89687274, im: 0.44228869 },
-    Complex32 { re: 0.90258528, im: 0.43051110 }, Complex32 { re: 0.90814317, im: 0.41865974 },
-    Complex32 { re: 0.91354546, im: 0.40673664 }, Complex32 { re: 0.91879121, im: 0.39474386 },
-    Complex32 { re: 0.92387953, im: 0.38268343 }, Complex32 { re: 0.92880955, im: 0.37055744 },
-    Complex32 { re: 0.93358043, im: 0.35836795 }, Complex32 { re: 0.93819134, im: 0.34611706 },
-    Complex32 { re: 0.94264149, im: 0.33380686 }, Complex32 { re: 0.94693013, im: 0.32143947 },
-    Complex32 { re: 0.95105652, im: 0.30901699 }, Complex32 { re: 0.95501994, im: 0.29654157 },
-    Complex32 { re: 0.95881973, im: 0.28401534 }, Complex32 { re: 0.96245524, im: 0.27144045 },
-    Complex32 { re: 0.96592583, im: 0.25881905 }, Complex32 { re: 0.96923091, im: 0.24615329 },
-    Complex32 { re: 0.97236992, im: 0.23344536 }, Complex32 { re: 0.97534232, im: 0.22069744 },
-    Complex32 { re: 0.97814760, im: 0.20791169 }, Complex32 { re: 0.98078528, im: 0.19509032 },
-    Complex32 { re: 0.98325491, im: 0.18223553 }, Complex32 { re: 0.98555606, im: 0.16934950 },
-    Complex32 { re: 0.98768834, im: 0.15643447 }, Complex32 { re: 0.98965139, im: 0.14349262 },
-    Complex32 { re: 0.99144486, im: 0.13052619 }, Complex32 { re: 0.99306846, im: 0.11753740 },
-    Complex32 { re: 0.99452190, im: 0.10452846 }, Complex32 { re: 0.99580493, im: 0.091501619 },
-    Complex32 { re: 0.99691733, im: 0.078459096 }, Complex32 { re: 0.99785892, im: 0.065403129 },
-    Complex32 { re: 0.99862953, im: 0.052335956 }, Complex32 { re: 0.99922904, im: 0.039259816 },
-    Complex32 { re: 0.99965732, im: 0.026176948 }, Complex32 { re: 0.99991433, im: 0.013089596 },
+const TWIDDLES_480000_960: &[Complex] = &[
+    Complex { r: 1.0000000, i: -0.0000000 }, Complex { r: 0.99991433, i: -0.013089596 },
+    Complex { r: 0.99965732, i: -0.026176948 }, Complex { r: 0.99922904, i: -0.039259816 },
+    Complex { r: 0.99862953, i: -0.052335956 }, Complex { r: 0.99785892, i: -0.065403129 },
+    Complex { r: 0.99691733, i: -0.078459096 }, Complex { r: 0.99580493, i: -0.091501619 },
+    Complex { r: 0.99452190, i: -0.10452846 }, Complex { r: 0.99306846, i: -0.11753740 },
+    Complex { r: 0.99144486, i: -0.13052619 }, Complex { r: 0.98965139, i: -0.14349262 },
+    Complex { r: 0.98768834, i: -0.15643447 }, Complex { r: 0.98555606, i: -0.16934950 },
+    Complex { r: 0.98325491, i: -0.18223553 }, Complex { r: 0.98078528, i: -0.19509032 },
+    Complex { r: 0.97814760, i: -0.20791169 }, Complex { r: 0.97534232, i: -0.22069744 },
+    Complex { r: 0.97236992, i: -0.23344536 }, Complex { r: 0.96923091, i: -0.24615329 },
+    Complex { r: 0.96592583, i: -0.25881905 }, Complex { r: 0.96245524, i: -0.27144045 },
+    Complex { r: 0.95881973, i: -0.28401534 }, Complex { r: 0.95501994, i: -0.29654157 },
+    Complex { r: 0.95105652, i: -0.30901699 }, Complex { r: 0.94693013, i: -0.32143947 },
+    Complex { r: 0.94264149, i: -0.33380686 }, Complex { r: 0.93819134, i: -0.34611706 },
+    Complex { r: 0.93358043, i: -0.35836795 }, Complex { r: 0.92880955, i: -0.37055744 },
+    Complex { r: 0.92387953, i: -0.38268343 }, Complex { r: 0.91879121, i: -0.39474386 },
+    Complex { r: 0.91354546, i: -0.40673664 }, Complex { r: 0.90814317, i: -0.41865974 },
+    Complex { r: 0.90258528, i: -0.43051110 }, Complex { r: 0.89687274, i: -0.44228869 },
+    Complex { r: 0.89100652, i: -0.45399050 }, Complex { r: 0.88498764, i: -0.46561452 },
+    Complex { r: 0.87881711, i: -0.47715876 }, Complex { r: 0.87249601, i: -0.48862124 },
+    Complex { r: 0.86602540, i: -0.50000000 }, Complex { r: 0.85940641, i: -0.51129309 },
+    Complex { r: 0.85264016, i: -0.52249856 }, Complex { r: 0.84572782, i: -0.53361452 },
+    Complex { r: 0.83867057, i: -0.54463904 }, Complex { r: 0.83146961, i: -0.55557023 },
+    Complex { r: 0.82412619, i: -0.56640624 }, Complex { r: 0.81664156, i: -0.57714519 },
+    Complex { r: 0.80901699, i: -0.58778525 }, Complex { r: 0.80125381, i: -0.59832460 },
+    Complex { r: 0.79335334, i: -0.60876143 }, Complex { r: 0.78531693, i: -0.61909395 },
+    Complex { r: 0.77714596, i: -0.62932039 }, Complex { r: 0.76884183, i: -0.63943900 },
+    Complex { r: 0.76040597, i: -0.64944805 }, Complex { r: 0.75183981, i: -0.65934582 },
+    Complex { r: 0.74314483, i: -0.66913061 }, Complex { r: 0.73432251, i: -0.67880075 },
+    Complex { r: 0.72537437, i: -0.68835458 }, Complex { r: 0.71630194, i: -0.69779046 },
+    Complex { r: 0.70710678, i: -0.70710678 }, Complex { r: 0.69779046, i: -0.71630194 },
+    Complex { r: 0.68835458, i: -0.72537437 }, Complex { r: 0.67880075, i: -0.73432251 },
+    Complex { r: 0.66913061, i: -0.74314483 }, Complex { r: 0.65934582, i: -0.75183981 },
+    Complex { r: 0.64944805, i: -0.76040597 }, Complex { r: 0.63943900, i: -0.76884183 },
+    Complex { r: 0.62932039, i: -0.77714596 }, Complex { r: 0.61909395, i: -0.78531693 },
+    Complex { r: 0.60876143, i: -0.79335334 }, Complex { r: 0.59832460, i: -0.80125381 },
+    Complex { r: 0.58778525, i: -0.80901699 }, Complex { r: 0.57714519, i: -0.81664156 },
+    Complex { r: 0.56640624, i: -0.82412619 }, Complex { r: 0.55557023, i: -0.83146961 },
+    Complex { r: 0.54463904, i: -0.83867057 }, Complex { r: 0.53361452, i: -0.84572782 },
+    Complex { r: 0.52249856, i: -0.85264016 }, Complex { r: 0.51129309, i: -0.85940641 },
+    Complex { r: 0.50000000, i: -0.86602540 }, Complex { r: 0.48862124, i: -0.87249601 },
+    Complex { r: 0.47715876, i: -0.87881711 }, Complex { r: 0.46561452, i: -0.88498764 },
+    Complex { r: 0.45399050, i: -0.89100652 }, Complex { r: 0.44228869, i: -0.89687274 },
+    Complex { r: 0.43051110, i: -0.90258528 }, Complex { r: 0.41865974, i: -0.90814317 },
+    Complex { r: 0.40673664, i: -0.91354546 }, Complex { r: 0.39474386, i: -0.91879121 },
+    Complex { r: 0.38268343, i: -0.92387953 }, Complex { r: 0.37055744, i: -0.92880955 },
+    Complex { r: 0.35836795, i: -0.93358043 }, Complex { r: 0.34611706, i: -0.93819134 },
+    Complex { r: 0.33380686, i: -0.94264149 }, Complex { r: 0.32143947, i: -0.94693013 },
+    Complex { r: 0.30901699, i: -0.95105652 }, Complex { r: 0.29654157, i: -0.95501994 },
+    Complex { r: 0.28401534, i: -0.95881973 }, Complex { r: 0.27144045, i: -0.96245524 },
+    Complex { r: 0.25881905, i: -0.96592583 }, Complex { r: 0.24615329, i: -0.96923091 },
+    Complex { r: 0.23344536, i: -0.97236992 }, Complex { r: 0.22069744, i: -0.97534232 },
+    Complex { r: 0.20791169, i: -0.97814760 }, Complex { r: 0.19509032, i: -0.98078528 },
+    Complex { r: 0.18223553, i: -0.98325491 }, Complex { r: 0.16934950, i: -0.98555606 },
+    Complex { r: 0.15643447, i: -0.98768834 }, Complex { r: 0.14349262, i: -0.98965139 },
+    Complex { r: 0.13052619, i: -0.99144486 }, Complex { r: 0.11753740, i: -0.99306846 },
+    Complex { r: 0.10452846, i: -0.99452190 }, Complex { r: 0.091501619, i: -0.99580493 },
+    Complex { r: 0.078459096, i: -0.99691733 }, Complex { r: 0.065403129, i: -0.99785892 },
+    Complex { r: 0.052335956, i: -0.99862953 }, Complex { r: 0.039259816, i: -0.99922904 },
+    Complex { r: 0.026176948, i: -0.99965732 }, Complex { r: 0.013089596, i: -0.99991433 },
+    Complex { r: 6.1230318e-17, i: -1.0000000 }, Complex { r: -0.013089596, i: -0.99991433 },
+    Complex { r: -0.026176948, i: -0.99965732 }, Complex { r: -0.039259816, i: -0.99922904 },
+    Complex { r: -0.052335956, i: -0.99862953 }, Complex { r: -0.065403129, i: -0.99785892 },
+    Complex { r: -0.078459096, i: -0.99691733 }, Complex { r: -0.091501619, i: -0.99580493 },
+    Complex { r: -0.10452846, i: -0.99452190 }, Complex { r: -0.11753740, i: -0.99306846 },
+    Complex { r: -0.13052619, i: -0.99144486 }, Complex { r: -0.14349262, i: -0.98965139 },
+    Complex { r: -0.15643447, i: -0.98768834 }, Complex { r: -0.16934950, i: -0.98555606 },
+    Complex { r: -0.18223553, i: -0.98325491 }, Complex { r: -0.19509032, i: -0.98078528 },
+    Complex { r: -0.20791169, i: -0.97814760 }, Complex { r: -0.22069744, i: -0.97534232 },
+    Complex { r: -0.23344536, i: -0.97236992 }, Complex { r: -0.24615329, i: -0.96923091 },
+    Complex { r: -0.25881905, i: -0.96592583 }, Complex { r: -0.27144045, i: -0.96245524 },
+    Complex { r: -0.28401534, i: -0.95881973 }, Complex { r: -0.29654157, i: -0.95501994 },
+    Complex { r: -0.30901699, i: -0.95105652 }, Complex { r: -0.32143947, i: -0.94693013 },
+    Complex { r: -0.33380686, i: -0.94264149 }, Complex { r: -0.34611706, i: -0.93819134 },
+    Complex { r: -0.35836795, i: -0.93358043 }, Complex { r: -0.37055744, i: -0.92880955 },
+    Complex { r: -0.38268343, i: -0.92387953 }, Complex { r: -0.39474386, i: -0.91879121 },
+    Complex { r: -0.40673664, i: -0.91354546 }, Complex { r: -0.41865974, i: -0.90814317 },
+    Complex { r: -0.43051110, i: -0.90258528 }, Complex { r: -0.44228869, i: -0.89687274 },
+    Complex { r: -0.45399050, i: -0.89100652 }, Complex { r: -0.46561452, i: -0.88498764 },
+    Complex { r: -0.47715876, i: -0.87881711 }, Complex { r: -0.48862124, i: -0.87249601 },
+    Complex { r: -0.50000000, i: -0.86602540 }, Complex { r: -0.51129309, i: -0.85940641 },
+    Complex { r: -0.52249856, i: -0.85264016 }, Complex { r: -0.53361452, i: -0.84572782 },
+    Complex { r: -0.54463904, i: -0.83867057 }, Complex { r: -0.55557023, i: -0.83146961 },
+    Complex { r: -0.56640624, i: -0.82412619 }, Complex { r: -0.57714519, i: -0.81664156 },
+    Complex { r: -0.58778525, i: -0.80901699 }, Complex { r: -0.59832460, i: -0.80125381 },
+    Complex { r: -0.60876143, i: -0.79335334 }, Complex { r: -0.61909395, i: -0.78531693 },
+    Complex { r: -0.62932039, i: -0.77714596 }, Complex { r: -0.63943900, i: -0.76884183 },
+    Complex { r: -0.64944805, i: -0.76040597 }, Complex { r: -0.65934582, i: -0.75183981 },
+    Complex { r: -0.66913061, i: -0.74314483 }, Complex { r: -0.67880075, i: -0.73432251 },
+    Complex { r: -0.68835458, i: -0.72537437 }, Complex { r: -0.69779046, i: -0.71630194 },
+    Complex { r: -0.70710678, i: -0.70710678 }, Complex { r: -0.71630194, i: -0.69779046 },
+    Complex { r: -0.72537437, i: -0.68835458 }, Complex { r: -0.73432251, i: -0.67880075 },
+    Complex { r: -0.74314483, i: -0.66913061 }, Complex { r: -0.75183981, i: -0.65934582 },
+    Complex { r: -0.76040597, i: -0.64944805 }, Complex { r: -0.76884183, i: -0.63943900 },
+    Complex { r: -0.77714596, i: -0.62932039 }, Complex { r: -0.78531693, i: -0.61909395 },
+    Complex { r: -0.79335334, i: -0.60876143 }, Complex { r: -0.80125381, i: -0.59832460 },
+    Complex { r: -0.80901699, i: -0.58778525 }, Complex { r: -0.81664156, i: -0.57714519 },
+    Complex { r: -0.82412619, i: -0.56640624 }, Complex { r: -0.83146961, i: -0.55557023 },
+    Complex { r: -0.83867057, i: -0.54463904 }, Complex { r: -0.84572782, i: -0.53361452 },
+    Complex { r: -0.85264016, i: -0.52249856 }, Complex { r: -0.85940641, i: -0.51129309 },
+    Complex { r: -0.86602540, i: -0.50000000 }, Complex { r: -0.87249601, i: -0.48862124 },
+    Complex { r: -0.87881711, i: -0.47715876 }, Complex { r: -0.88498764, i: -0.46561452 },
+    Complex { r: -0.89100652, i: -0.45399050 }, Complex { r: -0.89687274, i: -0.44228869 },
+    Complex { r: -0.90258528, i: -0.43051110 }, Complex { r: -0.90814317, i: -0.41865974 },
+    Complex { r: -0.91354546, i: -0.40673664 }, Complex { r: -0.91879121, i: -0.39474386 },
+    Complex { r: -0.92387953, i: -0.38268343 }, Complex { r: -0.92880955, i: -0.37055744 },
+    Complex { r: -0.93358043, i: -0.35836795 }, Complex { r: -0.93819134, i: -0.34611706 },
+    Complex { r: -0.94264149, i: -0.33380686 }, Complex { r: -0.94693013, i: -0.32143947 },
+    Complex { r: -0.95105652, i: -0.30901699 }, Complex { r: -0.95501994, i: -0.29654157 },
+    Complex { r: -0.95881973, i: -0.28401534 }, Complex { r: -0.96245524, i: -0.27144045 },
+    Complex { r: -0.96592583, i: -0.25881905 }, Complex { r: -0.96923091, i: -0.24615329 },
+    Complex { r: -0.97236992, i: -0.23344536 }, Complex { r: -0.97534232, i: -0.22069744 },
+    Complex { r: -0.97814760, i: -0.20791169 }, Complex { r: -0.98078528, i: -0.19509032 },
+    Complex { r: -0.98325491, i: -0.18223553 }, Complex { r: -0.98555606, i: -0.16934950 },
+    Complex { r: -0.98768834, i: -0.15643447 }, Complex { r: -0.98965139, i: -0.14349262 },
+    Complex { r: -0.99144486, i: -0.13052619 }, Complex { r: -0.99306846, i: -0.11753740 },
+    Complex { r: -0.99452190, i: -0.10452846 }, Complex { r: -0.99580493, i: -0.091501619 },
+    Complex { r: -0.99691733, i: -0.078459096 }, Complex { r: -0.99785892, i: -0.065403129 },
+    Complex { r: -0.99862953, i: -0.052335956 }, Complex { r: -0.99922904, i: -0.039259816 },
+    Complex { r: -0.99965732, i: -0.026176948 }, Complex { r: -0.99991433, i: -0.013089596 },
+    Complex { r: -1.0000000, i: -1.2246064e-16 }, Complex { r: -0.99991433, i: 0.013089596 },
+    Complex { r: -0.99965732, i: 0.026176948 }, Complex { r: -0.99922904, i: 0.039259816 },
+    Complex { r: -0.99862953, i: 0.052335956 }, Complex { r: -0.99785892, i: 0.065403129 },
+    Complex { r: -0.99691733, i: 0.078459096 }, Complex { r: -0.99580493, i: 0.091501619 },
+    Complex { r: -0.99452190, i: 0.10452846 }, Complex { r: -0.99306846, i: 0.11753740 },
+    Complex { r: -0.99144486, i: 0.13052619 }, Complex { r: -0.98965139, i: 0.14349262 },
+    Complex { r: -0.98768834, i: 0.15643447 }, Complex { r: -0.98555606, i: 0.16934950 },
+    Complex { r: -0.98325491, i: 0.18223553 }, Complex { r: -0.98078528, i: 0.19509032 },
+    Complex { r: -0.97814760, i: 0.20791169 }, Complex { r: -0.97534232, i: 0.22069744 },
+    Complex { r: -0.97236992, i: 0.23344536 }, Complex { r: -0.96923091, i: 0.24615329 },
+    Complex { r: -0.96592583, i: 0.25881905 }, Complex { r: -0.96245524, i: 0.27144045 },
+    Complex { r: -0.95881973, i: 0.28401534 }, Complex { r: -0.95501994, i: 0.29654157 },
+    Complex { r: -0.95105652, i: 0.30901699 }, Complex { r: -0.94693013, i: 0.32143947 },
+    Complex { r: -0.94264149, i: 0.33380686 }, Complex { r: -0.93819134, i: 0.34611706 },
+    Complex { r: -0.93358043, i: 0.35836795 }, Complex { r: -0.92880955, i: 0.37055744 },
+    Complex { r: -0.92387953, i: 0.38268343 }, Complex { r: -0.91879121, i: 0.39474386 },
+    Complex { r: -0.91354546, i: 0.40673664 }, Complex { r: -0.90814317, i: 0.41865974 },
+    Complex { r: -0.90258528, i: 0.43051110 }, Complex { r: -0.89687274, i: 0.44228869 },
+    Complex { r: -0.89100652, i: 0.45399050 }, Complex { r: -0.88498764, i: 0.46561452 },
+    Complex { r: -0.87881711, i: 0.47715876 }, Complex { r: -0.87249601, i: 0.48862124 },
+    Complex { r: -0.86602540, i: 0.50000000 }, Complex { r: -0.85940641, i: 0.51129309 },
+    Complex { r: -0.85264016, i: 0.52249856 }, Complex { r: -0.84572782, i: 0.53361452 },
+    Complex { r: -0.83867057, i: 0.54463904 }, Complex { r: -0.83146961, i: 0.55557023 },
+    Complex { r: -0.82412619, i: 0.56640624 }, Complex { r: -0.81664156, i: 0.57714519 },
+    Complex { r: -0.80901699, i: 0.58778525 }, Complex { r: -0.80125381, i: 0.59832460 },
+    Complex { r: -0.79335334, i: 0.60876143 }, Complex { r: -0.78531693, i: 0.61909395 },
+    Complex { r: -0.77714596, i: 0.62932039 }, Complex { r: -0.76884183, i: 0.63943900 },
+    Complex { r: -0.76040597, i: 0.64944805 }, Complex { r: -0.75183981, i: 0.65934582 },
+    Complex { r: -0.74314483, i: 0.66913061 }, Complex { r: -0.73432251, i: 0.67880075 },
+    Complex { r: -0.72537437, i: 0.68835458 }, Complex { r: -0.71630194, i: 0.69779046 },
+    Complex { r: -0.70710678, i: 0.70710678 }, Complex { r: -0.69779046, i: 0.71630194 },
+    Complex { r: -0.68835458, i: 0.72537437 }, Complex { r: -0.67880075, i: 0.73432251 },
+    Complex { r: -0.66913061, i: 0.74314483 }, Complex { r: -0.65934582, i: 0.75183981 },
+    Complex { r: -0.64944805, i: 0.76040597 }, Complex { r: -0.63943900, i: 0.76884183 },
+    Complex { r: -0.62932039, i: 0.77714596 }, Complex { r: -0.61909395, i: 0.78531693 },
+    Complex { r: -0.60876143, i: 0.79335334 }, Complex { r: -0.59832460, i: 0.80125381 },
+    Complex { r: -0.58778525, i: 0.80901699 }, Complex { r: -0.57714519, i: 0.81664156 },
+    Complex { r: -0.56640624, i: 0.82412619 }, Complex { r: -0.55557023, i: 0.83146961 },
+    Complex { r: -0.54463904, i: 0.83867057 }, Complex { r: -0.53361452, i: 0.84572782 },
+    Complex { r: -0.52249856, i: 0.85264016 }, Complex { r: -0.51129309, i: 0.85940641 },
+    Complex { r: -0.50000000, i: 0.86602540 }, Complex { r: -0.48862124, i: 0.87249601 },
+    Complex { r: -0.47715876, i: 0.87881711 }, Complex { r: -0.46561452, i: 0.88498764 },
+    Complex { r: -0.45399050, i: 0.89100652 }, Complex { r: -0.44228869, i: 0.89687274 },
+    Complex { r: -0.43051110, i: 0.90258528 }, Complex { r: -0.41865974, i: 0.90814317 },
+    Complex { r: -0.40673664, i: 0.91354546 }, Complex { r: -0.39474386, i: 0.91879121 },
+    Complex { r: -0.38268343, i: 0.92387953 }, Complex { r: -0.37055744, i: 0.92880955 },
+    Complex { r: -0.35836795, i: 0.93358043 }, Complex { r: -0.34611706, i: 0.93819134 },
+    Complex { r: -0.33380686, i: 0.94264149 }, Complex { r: -0.32143947, i: 0.94693013 },
+    Complex { r: -0.30901699, i: 0.95105652 }, Complex { r: -0.29654157, i: 0.95501994 },
+    Complex { r: -0.28401534, i: 0.95881973 }, Complex { r: -0.27144045, i: 0.96245524 },
+    Complex { r: -0.25881905, i: 0.96592583 }, Complex { r: -0.24615329, i: 0.96923091 },
+    Complex { r: -0.23344536, i: 0.97236992 }, Complex { r: -0.22069744, i: 0.97534232 },
+    Complex { r: -0.20791169, i: 0.97814760 }, Complex { r: -0.19509032, i: 0.98078528 },
+    Complex { r: -0.18223553, i: 0.98325491 }, Complex { r: -0.16934950, i: 0.98555606 },
+    Complex { r: -0.15643447, i: 0.98768834 }, Complex { r: -0.14349262, i: 0.98965139 },
+    Complex { r: -0.13052619, i: 0.99144486 }, Complex { r: -0.11753740, i: 0.99306846 },
+    Complex { r: -0.10452846, i: 0.99452190 }, Complex { r: -0.091501619, i: 0.99580493 },
+    Complex { r: -0.078459096, i: 0.99691733 }, Complex { r: -0.065403129, i: 0.99785892 },
+    Complex { r: -0.052335956, i: 0.99862953 }, Complex { r: -0.039259816, i: 0.99922904 },
+    Complex { r: -0.026176948, i: 0.99965732 }, Complex { r: -0.013089596, i: 0.99991433 },
+    Complex { r: -1.8369095e-16, i: 1.0000000 }, Complex { r: 0.013089596, i: 0.99991433 },
+    Complex { r: 0.026176948, i: 0.99965732 }, Complex { r: 0.039259816, i: 0.99922904 },
+    Complex { r: 0.052335956, i: 0.99862953 }, Complex { r: 0.065403129, i: 0.99785892 },
+    Complex { r: 0.078459096, i: 0.99691733 }, Complex { r: 0.091501619, i: 0.99580493 },
+    Complex { r: 0.10452846, i: 0.99452190 }, Complex { r: 0.11753740, i: 0.99306846 },
+    Complex { r: 0.13052619, i: 0.99144486 }, Complex { r: 0.14349262, i: 0.98965139 },
+    Complex { r: 0.15643447, i: 0.98768834 }, Complex { r: 0.16934950, i: 0.98555606 },
+    Complex { r: 0.18223553, i: 0.98325491 }, Complex { r: 0.19509032, i: 0.98078528 },
+    Complex { r: 0.20791169, i: 0.97814760 }, Complex { r: 0.22069744, i: 0.97534232 },
+    Complex { r: 0.23344536, i: 0.97236992 }, Complex { r: 0.24615329, i: 0.96923091 },
+    Complex { r: 0.25881905, i: 0.96592583 }, Complex { r: 0.27144045, i: 0.96245524 },
+    Complex { r: 0.28401534, i: 0.95881973 }, Complex { r: 0.29654157, i: 0.95501994 },
+    Complex { r: 0.30901699, i: 0.95105652 }, Complex { r: 0.32143947, i: 0.94693013 },
+    Complex { r: 0.33380686, i: 0.94264149 }, Complex { r: 0.34611706, i: 0.93819134 },
+    Complex { r: 0.35836795, i: 0.93358043 }, Complex { r: 0.37055744, i: 0.92880955 },
+    Complex { r: 0.38268343, i: 0.92387953 }, Complex { r: 0.39474386, i: 0.91879121 },
+    Complex { r: 0.40673664, i: 0.91354546 }, Complex { r: 0.41865974, i: 0.90814317 },
+    Complex { r: 0.43051110, i: 0.90258528 }, Complex { r: 0.44228869, i: 0.89687274 },
+    Complex { r: 0.45399050, i: 0.89100652 }, Complex { r: 0.46561452, i: 0.88498764 },
+    Complex { r: 0.47715876, i: 0.87881711 }, Complex { r: 0.48862124, i: 0.87249601 },
+    Complex { r: 0.50000000, i: 0.86602540 }, Complex { r: 0.51129309, i: 0.85940641 },
+    Complex { r: 0.52249856, i: 0.85264016 }, Complex { r: 0.53361452, i: 0.84572782 },
+    Complex { r: 0.54463904, i: 0.83867057 }, Complex { r: 0.55557023, i: 0.83146961 },
+    Complex { r: 0.56640624, i: 0.82412619 }, Complex { r: 0.57714519, i: 0.81664156 },
+    Complex { r: 0.58778525, i: 0.80901699 }, Complex { r: 0.59832460, i: 0.80125381 },
+    Complex { r: 0.60876143, i: 0.79335334 }, Complex { r: 0.61909395, i: 0.78531693 },
+    Complex { r: 0.62932039, i: 0.77714596 }, Complex { r: 0.63943900, i: 0.76884183 },
+    Complex { r: 0.64944805, i: 0.76040597 }, Complex { r: 0.65934582, i: 0.75183981 },
+    Complex { r: 0.66913061, i: 0.74314483 }, Complex { r: 0.67880075, i: 0.73432251 },
+    Complex { r: 0.68835458, i: 0.72537437 }, Complex { r: 0.69779046, i: 0.71630194 },
+    Complex { r: 0.70710678, i: 0.70710678 }, Complex { r: 0.71630194, i: 0.69779046 },
+    Complex { r: 0.72537437, i: 0.68835458 }, Complex { r: 0.73432251, i: 0.67880075 },
+    Complex { r: 0.74314483, i: 0.66913061 }, Complex { r: 0.75183981, i: 0.65934582 },
+    Complex { r: 0.76040597, i: 0.64944805 }, Complex { r: 0.76884183, i: 0.63943900 },
+    Complex { r: 0.77714596, i: 0.62932039 }, Complex { r: 0.78531693, i: 0.61909395 },
+    Complex { r: 0.79335334, i: 0.60876143 }, Complex { r: 0.80125381, i: 0.59832460 },
+    Complex { r: 0.80901699, i: 0.58778525 }, Complex { r: 0.81664156, i: 0.57714519 },
+    Complex { r: 0.82412619, i: 0.56640624 }, Complex { r: 0.83146961, i: 0.55557023 },
+    Complex { r: 0.83867057, i: 0.54463904 }, Complex { r: 0.84572782, i: 0.53361452 },
+    Complex { r: 0.85264016, i: 0.52249856 }, Complex { r: 0.85940641, i: 0.51129309 },
+    Complex { r: 0.86602540, i: 0.50000000 }, Complex { r: 0.87249601, i: 0.48862124 },
+    Complex { r: 0.87881711, i: 0.47715876 }, Complex { r: 0.88498764, i: 0.46561452 },
+    Complex { r: 0.89100652, i: 0.45399050 }, Complex { r: 0.89687274, i: 0.44228869 },
+    Complex { r: 0.90258528, i: 0.43051110 }, Complex { r: 0.90814317, i: 0.41865974 },
+    Complex { r: 0.91354546, i: 0.40673664 }, Complex { r: 0.91879121, i: 0.39474386 },
+    Complex { r: 0.92387953, i: 0.38268343 }, Complex { r: 0.92880955, i: 0.37055744 },
+    Complex { r: 0.93358043, i: 0.35836795 }, Complex { r: 0.93819134, i: 0.34611706 },
+    Complex { r: 0.94264149, i: 0.33380686 }, Complex { r: 0.94693013, i: 0.32143947 },
+    Complex { r: 0.95105652, i: 0.30901699 }, Complex { r: 0.95501994, i: 0.29654157 },
+    Complex { r: 0.95881973, i: 0.28401534 }, Complex { r: 0.96245524, i: 0.27144045 },
+    Complex { r: 0.96592583, i: 0.25881905 }, Complex { r: 0.96923091, i: 0.24615329 },
+    Complex { r: 0.97236992, i: 0.23344536 }, Complex { r: 0.97534232, i: 0.22069744 },
+    Complex { r: 0.97814760, i: 0.20791169 }, Complex { r: 0.98078528, i: 0.19509032 },
+    Complex { r: 0.98325491, i: 0.18223553 }, Complex { r: 0.98555606, i: 0.16934950 },
+    Complex { r: 0.98768834, i: 0.15643447 }, Complex { r: 0.98965139, i: 0.14349262 },
+    Complex { r: 0.99144486, i: 0.13052619 }, Complex { r: 0.99306846, i: 0.11753740 },
+    Complex { r: 0.99452190, i: 0.10452846 }, Complex { r: 0.99580493, i: 0.091501619 },
+    Complex { r: 0.99691733, i: 0.078459096 }, Complex { r: 0.99785892, i: 0.065403129 },
+    Complex { r: 0.99862953, i: 0.052335956 }, Complex { r: 0.99922904, i: 0.039259816 },
+    Complex { r: 0.99965732, i: 0.026176948 }, Complex { r: 0.99991433, i: 0.013089596 },
 ];
 
 #[cfg(test)]
@@ -591,7 +590,7 @@ mod tests {
     use super::*;
 
     /// Applies the forward FFT on the given data in `input` and saved the result in `output`.
-    fn forward(fft: &KissFft, input: &[Complex32], output: &mut [Complex32]) {
+    fn forward(fft: &KissFft, input: &[Complex], output: &mut [Complex]) {
         // Bit-reverse and scale the input.
         (0..fft.nfft).into_iter().for_each(|i| {
             output[usize::from(fft.bitrev[i])] = input[i] * fft.scale;
@@ -601,24 +600,24 @@ mod tests {
     }
 
     /// Applies the inverse FFT on the given data in `input` and saved the result in `output`.
-    fn inverse(fft: &KissFft, input: &[Complex32], output: &mut [Complex32]) {
+    fn inverse(fft: &KissFft, input: &[Complex], output: &mut [Complex]) {
         // Bit-reverse the input.
         (0..fft.nfft).into_iter().for_each(|i| {
             output[usize::from(fft.bitrev[i])] = input[i];
         });
 
         (0..fft.nfft).into_iter().for_each(|i| {
-            output[i].im = -output[i].im;
+            output[i].i = -output[i].i;
         });
 
         fft.process(output);
 
         (0..fft.nfft).into_iter().for_each(|i| {
-            output[i].im = -output[i].im;
+            output[i].i = -output[i].i;
         });
     }
 
-    fn check(input: &[Complex32], output: &[Complex32], nfft: usize, is_inverse: bool) {
+    fn check(input: &[Complex], output: &[Complex], nfft: usize, is_inverse: bool) {
         let mut err_pow: f64 = 0.0;
         let mut sig_pow: f64 = 0.0;
 
@@ -638,12 +637,12 @@ mod tests {
                     im /= nfft as f64;
                 }
 
-                ansr += fin.re as f64 * re - fin.im as f64 * im;
-                ansi += fin.re as f64 * im + fin.im as f64 * re;
+                ansr += fin.r as f64 * re - fin.i as f64 * im;
+                ansi += fin.r as f64 * im + fin.i as f64 * re;
             });
 
-            let difr = ansr - fout.re as f64;
-            let difi = ansi - fout.im as f64;
+            let difr = ansr - fout.r as f64;
+            let difi = ansi - fout.i as f64;
             err_pow += difr * difr + difi * difi;
             sig_pow += ansr * ansr + ansi * ansi;
         });
@@ -660,25 +659,24 @@ mod tests {
 
     fn test1d(nfft: usize, is_inverse: bool) {
         let mut rng = nanorand::WyRand::new_seed(42);
-        let mut input = vec![Complex32::default(); nfft];
-        let mut output = vec![Complex32::default(); nfft];
+        let mut input = vec![Complex::default(); nfft];
+        let mut output = vec![Complex::default(); nfft];
 
         let fft = FFT_CONFIGURATION.iter().find(|c| c.nfft == nfft).unwrap();
 
         input.iter_mut().for_each(|x| {
-            x.re = (rng.generate_range::<u32>(0, 32767) as i16 - 16384) as f32;
-            x.im = (rng.generate_range::<u32>(0, 32767) as i16 - 16384) as f32;
+            x.r = (rng.generate_range::<u32>(0, 32767) as i16 - 16384) as f32;
+            x.i = (rng.generate_range::<u32>(0, 32767) as i16 - 16384) as f32;
         });
 
         input.iter_mut().for_each(|x| {
-            x.re *= 32768.0;
-            x.im *= 32768.0;
+            *x *= 32768.0;
         });
 
         if is_inverse {
             input.iter_mut().for_each(|x| {
-                x.re /= nfft as f32;
-                x.im /= nfft as f32;
+                x.r /= nfft as f32;
+                x.i /= nfft as f32;
             });
         }
 

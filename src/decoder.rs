@@ -4,6 +4,7 @@ use std::cmp::Ordering;
 use std::num::NonZeroUsize;
 
 use crate::celt::CeltDecoder;
+use crate::math::fast_exp2;
 use crate::range_coder::{RangeDecoder, Tell};
 use crate::silk::{LostFlag, SilkDecoder};
 use crate::DecoderError::FrameSizeTooSmall;
@@ -795,7 +796,7 @@ impl DecoderInner {
         }
 
         if self.decode_gain != 0 {
-            let gain = f32::exp2(6.48814081e-4 * self.decode_gain as f32);
+            let gain = fast_exp2(6.48814081e-4 * self.decode_gain as f32);
             (0..frame_size * self.channels as usize)
                 .into_iter()
                 .for_each(|i| {
