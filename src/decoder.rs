@@ -581,10 +581,8 @@ impl DecoderInner {
                         self.silk_dec
                             .set_internal_sampling_rate(SamplingRate::Hz16000);
                     } else {
-                        // TODO can this happen normally? Should we return an error instead?
-                        self.silk_dec
-                            .set_internal_sampling_rate(SamplingRate::Hz16000);
-                        debug_assert!(false);
+                        // The specification states that SILK is only used up until wideband.
+                        return Err(DecoderError::InvalidPacket);
                     }
                 } else {
                     // Hybrid mode.
