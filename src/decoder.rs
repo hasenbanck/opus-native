@@ -467,7 +467,7 @@ impl DecoderInner {
         }
 
         // Payloads of 1 (2 including ToC) or 0 trigger the PLC/DTX.
-        let (audiosize, mode, bandwidth) = if len <= 1 {
+        let (mut dec, audiosize, mode, bandwidth) = if len <= 1 {
             // In that case, don't conceal more than what the ToC says.
             frame_size = usize::min(frame_size, self.frame_size);
 
@@ -513,13 +513,11 @@ impl DecoderInner {
                 Ordering::Equal => { /* Case not covered by the reference implementation */ }
             }
 
-            (audiosize, mode, bandwidth)
+            (None, audiosize, mode, bandwidth)
         } else {
-            (self.frame_size, self.mode, self.bandwidth)
+            let mut dec = packet.as_ref().map(|packet| RangeDecoder::new(packet));
+            (dec, self.frame_size, self.mode, self.bandwidth)
         };
-
-        // Initialize the range decoder if we have a packet.
-        let mut dec = packet.as_ref().map(|packet| RangeDecoder::new(packet));
 
         let (mut pcm_transition_silk_size, pcm_transition_celt_size) = if packet.is_some()
             && self.prev_mode.is_some()
@@ -831,10 +829,7 @@ impl DecoderInner {
                 });
         }
 
-        // TODO Case 0 and case 2 might be the same case.
-        if len <= 1 {
-            self.final_range = 0;
-        } else if let Some(dec) = dec.as_ref() {
+        if let Some(dec) = dec.as_ref() {
             self.final_range = dec.range() ^ redundant_range;
         } else {
             self.final_range = 0;
