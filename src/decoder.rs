@@ -446,7 +446,7 @@ impl DecoderInner {
     #[allow(clippy::excessive_precision)]
     fn decode_frame(
         &mut self,
-        packet: &Option<&[u8]>,
+        data: &Option<&[u8]>,
         samples: &mut [f32],
         mut sample_offset: usize,
         mut frame_size: usize,
@@ -456,7 +456,7 @@ impl DecoderInner {
         let mut redundancy_bytes = 0;
         let mut celt_to_silk = false;
         let mut redundant_range: u32 = 0;
-        let mut len = packet.map_or(0, |x| x.len()) as u32;
+        let mut len = data.map_or(0, |x| x.len()) as u32;
 
         let f20 = self.sampling_rate as usize / 50;
         let f10 = f20 >> 1;
@@ -515,11 +515,11 @@ impl DecoderInner {
 
             (None, audiosize, mode, bandwidth)
         } else {
-            let mut dec = packet.as_ref().map(|packet| RangeDecoder::new(packet));
+            let mut dec = data.as_ref().map(|data| RangeDecoder::new(data));
             (dec, self.frame_size, self.mode, self.bandwidth)
         };
 
-        let (mut pcm_transition_silk_size, pcm_transition_celt_size) = if packet.is_some()
+        let (mut pcm_transition_silk_size, pcm_transition_celt_size) = if data.is_some()
             && self.prev_mode.is_some()
             && ((mode == Some(CodecMode::CeltOnly)
                 && self.prev_mode != Some(CodecMode::CeltOnly)
@@ -568,7 +568,7 @@ impl DecoderInner {
                 1000 * audiosize / self.sampling_rate as usize,
             ));
 
-            if packet.is_some() {
+            if data.is_some() {
                 self.silk_dec.set_internal_channels(self.stream_channels);
                 if mode == Some(CodecMode::SilkOnly) {
                     if bandwidth == Some(Bandwidth::Narrowband) {
@@ -591,7 +591,7 @@ impl DecoderInner {
                 }
             }
 
-            let lost_flag = if packet.is_none() {
+            let lost_flag = if data.is_none() {
                 LostFlag::Loss
             } else if decode_fec {
                 LostFlag::DecodeFec
@@ -690,18 +690,7 @@ impl DecoderInner {
 
         // 5 ms redundant frame for CELT->SILK.
         if redundancy && celt_to_silk {
-            self.celt_dec.set_start_band(0);
-            if let Some(packet) = packet {
-                self.celt_dec.decode(
-                    &Some(&packet[len as usize..]),
-                    redundancy_bytes as usize,
-                    &mut self.redundant_audio,
-                    f5,
-                    &mut dec,
-                );
-            }
-
-            redundant_range = self.celt_dec.final_range();
+            self.decode_redundancy(data, redundancy_bytes, &mut redundant_range, len, f5);
         }
 
         // MUST be after PLC.
@@ -718,7 +707,7 @@ impl DecoderInner {
                 self.celt_dec.reset()?;
             }
 
-            let data = if decode_fec { &None } else { packet };
+            let data = if decode_fec { &None } else { data };
 
             // Decode CELT.
             self.celt_dec
@@ -745,18 +734,7 @@ impl DecoderInner {
         // 5 ms redundant frame for SILK->CELT.
         if redundancy && !celt_to_silk {
             self.celt_dec.reset()?;
-            self.celt_dec.set_start_band(0);
-
-            if let Some(packet) = packet {
-                self.celt_dec.decode(
-                    &Some(&packet[len as usize..]),
-                    redundancy_bytes as usize,
-                    &mut self.redundant_audio,
-                    f5,
-                    &mut None,
-                );
-            }
-            redundant_range = self.celt_dec.final_range();
+            self.decode_redundancy(data, redundancy_bytes, &mut redundant_range, len, f5);
             smooth_fade_into_in1(
                 &mut samples[self.channels as usize * (frame_size - f2_5)..],
                 &self.redundant_audio[self.channels as usize * f2_5..],
@@ -835,6 +813,27 @@ impl DecoderInner {
         self.prev_redundancy = redundancy && !celt_to_silk;
 
         Ok(audiosize)
+    }
+
+    fn decode_redundancy(
+        &mut self,
+        data: &Option<&[u8]>,
+        redundancy_bytes: u32,
+        mut redundant_range: &mut u32,
+        len: u32,
+        f5: usize,
+    ) {
+        self.celt_dec.set_start_band(0);
+        if let Some(data) = data {
+            self.celt_dec.decode(
+                &Some(&data[len as usize..]),
+                redundancy_bytes as usize,
+                &mut self.redundant_audio,
+                f5,
+                &mut None,
+            );
+        }
+        *redundant_range = self.celt_dec.final_range();
     }
 }
 
