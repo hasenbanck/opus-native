@@ -690,7 +690,7 @@ impl DecoderInner {
 
         // 5 ms redundant frame for CELT->SILK.
         if redundancy && celt_to_silk {
-            self.decode_redundancy(data, redundancy_bytes, &mut redundant_range, len, f5);
+            self.decode_redundancy(data, len, redundancy_bytes, &mut redundant_range, f5);
         }
 
         // MUST be after PLC.
@@ -734,7 +734,7 @@ impl DecoderInner {
         // 5 ms redundant frame for SILK->CELT.
         if redundancy && !celt_to_silk {
             self.celt_dec.reset()?;
-            self.decode_redundancy(data, redundancy_bytes, &mut redundant_range, len, f5);
+            self.decode_redundancy(data, len, redundancy_bytes, &mut redundant_range, f5);
             smooth_fade_into_in1(
                 &mut samples[self.channels as usize * (frame_size - f2_5)..],
                 &self.redundant_audio[self.channels as usize * f2_5..],
@@ -818,10 +818,10 @@ impl DecoderInner {
     fn decode_redundancy(
         &mut self,
         data: &Option<&[u8]>,
+        len: u32,
         redundancy_bytes: u32,
         mut redundant_range: &mut u32,
-        len: u32,
-        f5: usize,
+        frame_size: usize,
     ) {
         self.celt_dec.set_start_band(0);
         if let Some(data) = data {
@@ -829,7 +829,7 @@ impl DecoderInner {
                 &Some(&data[len as usize..]),
                 redundancy_bytes as usize,
                 &mut self.redundant_audio,
-                f5,
+                frame_size,
                 &mut None,
             );
         }
