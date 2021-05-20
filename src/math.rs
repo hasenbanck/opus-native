@@ -23,7 +23,7 @@ pub(crate) fn fast_exp2(x: f32) -> f32 {
 /// Fast version for atan2.
 #[allow(clippy::excessive_precision)]
 #[inline(always)]
-pub(crate) fn fast_atan2(x: f32, y: f32) -> f32 {
+pub(crate) fn fast_atan2(y: f32, x: f32) -> f32 {
     const A: f32 = 0.43157974;
     const B: f32 = 0.67848403;
     const C: f32 = 0.08595542;
@@ -297,5 +297,24 @@ mod tests {
         assert_eq!(bitexact_log2tan(32767, 200), 15059);
         assert_eq!(bitexact_log2tan(30274, 12540), 2611);
         assert_eq!(bitexact_log2tan(23171, 23171), 0);
+    }
+
+    #[test]
+    fn test_atan2() {
+        assert!((fast_atan2(0.0, 0.0) - 0.0).abs() < 0.0001);
+        assert!((fast_atan2(0.3551356, 0.2844108) - 0.8955373).abs() < 0.00001);
+        assert!((fast_atan2(0.7484663, 0.6631728) - 0.8457406).abs() < 0.00001);
+        assert!((fast_atan2(0.1315983, 0.7368063) - 0.1767448).abs() < 0.00001);
+        assert!((fast_atan2(0.6271196, 0.2156832) - 1.2395358).abs() < 0.00001);
+        assert!((fast_atan2(0.9759809, 0.2178561) - 1.3511757).abs() < 0.00001);
+        assert!((fast_atan2(0.0372807, 0.9752686) - 0.0382075).abs() < 0.00001);
+        assert!((fast_atan2(0.1181177, 0.1830559) - 0.5730263).abs() < 0.00001);
+        assert!((fast_atan2(-0.0888729, 0.0723961) + 0.887214).abs() < 0.00001);
+        assert!((fast_atan2(-0.0022723, 0.1452635) + 0.0156412).abs() < 0.00001);
+        assert!((fast_atan2(0.0612437, -0.0035089) - 1.6280283).abs() < 0.00001);
+        assert!((fast_atan2(-0.0003115, -0.0028101) + 3.0311935).abs() < 0.00001);
+        assert!((fast_atan2(-0.0342708, 0.0005294) + 1.5553488).abs() < 0.00001);
+        assert!((fast_atan2(0.0031906, -0.0004747) - 1.7184927).abs() < 0.00001);
+        assert!((fast_atan2(0.0253257, 0.0034328) - 1.436072).abs() < 0.00001);
     }
 }
