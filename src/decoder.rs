@@ -649,7 +649,7 @@ impl DecoderInner {
                             redundancy = false;
                         }
                         // Shrink decoder because of raw bits.
-                        dec.remove_storage(redundancy_bytes as usize);
+                        dec.shrink_storage(redundancy_bytes as usize);
                     }
                 }
             }

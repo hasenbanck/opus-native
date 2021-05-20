@@ -78,8 +78,8 @@ impl<'d> RangeDecoder<'d> {
     }
 
     /// Lowers the length of the usable buffer.
-    pub(crate) fn remove_storage(&mut self, length: usize) {
-        self.storage -= length;
+    pub(crate) fn shrink_storage(&mut self, shrink_by: usize) {
+        self.storage -= shrink_by;
     }
 
     /// Reads the next byte from the start of the buffer.
