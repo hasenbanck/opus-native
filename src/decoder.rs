@@ -377,8 +377,7 @@ impl DecoderInner {
 
                 self.decode_frame(
                     &Some(&packet[offset..offset + self.frame_sizes[0]]),
-                    samples,
-                    (frame_size - packet_frame_size) * self.channels as usize,
+                    &mut samples[(frame_size - packet_frame_size) * self.channels as usize..],
                     packet_frame_size,
                     true,
                 )?;
@@ -400,8 +399,7 @@ impl DecoderInner {
                 (0..count).into_iter().try_for_each(|i| {
                     let count = self.decode_frame(
                         &Some(&packet[offset..offset + self.frame_sizes[i]]),
-                        samples,
-                        sample_count * self.channels as usize,
+                        &mut samples[sample_count * self.channels as usize..],
                         frame_size - sample_count,
                         false,
                     )?;
@@ -431,8 +429,7 @@ impl DecoderInner {
             while sample_count < frame_size {
                 let count = self.decode_frame(
                     &None,
-                    samples,
-                    sample_count * self.channels as usize,
+                    &mut samples[sample_count * self.channels as usize..],
                     frame_size - sample_count,
                     false,
                 )?;
@@ -449,7 +446,6 @@ impl DecoderInner {
         &mut self,
         data: &Option<&[u8]>,
         samples: &mut [f32],
-        mut sample_offset: usize,
         mut frame_size: usize,
         decode_fec: bool,
     ) -> Result<usize, DecoderError> {
@@ -481,7 +477,7 @@ impl DecoderInner {
                 (0..audiosize * self.channels as usize)
                     .into_iter()
                     .for_each(|i| {
-                        samples[sample_offset + i] = 0.0;
+                        samples[i] = 0.0;
                     });
 
                 return Ok(audiosize);
@@ -490,11 +486,11 @@ impl DecoderInner {
             // Avoids trying to run the PLC on sizes other than 2.5 (CELT), 5 (CELT), 10, or 20 (e.g. 12.5 or 30 ms).
             match audiosize.cmp(&f20) {
                 Ordering::Greater => {
+                    let mut sample_offset = 0;
                     while audiosize > 0 {
                         let sample_count = self.decode_frame(
                             &None,
-                            samples,
-                            sample_offset,
+                            &mut samples[sample_offset..],
                             usize::min(audiosize, f20),
                             false,
                         )?;
@@ -542,7 +538,7 @@ impl DecoderInner {
 
         if mode == Some(CodecMode::CeltOnly) {
             if let Some(buffer) = transition_buffer.as_mut() {
-                self.decode_frame(&None, buffer, 0, usize::min(f5, audiosize), false)?;
+                self.decode_frame(&None, buffer, usize::min(f5, audiosize), false)?;
             }
         }
 
@@ -667,7 +663,7 @@ impl DecoderInner {
 
         if mode != Some(CodecMode::CeltOnly) {
             if let Some(buffer) = transition_buffer.as_mut() {
-                self.decode_frame(&None, buffer, 0, usize::min(f5, audiosize), false)?;
+                self.decode_frame(&None, buffer, usize::min(f5, audiosize), false)?;
             }
         }
 
