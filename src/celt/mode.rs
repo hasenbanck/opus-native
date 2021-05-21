@@ -30,7 +30,7 @@ pub(crate) const ALLOC_VECTORS: &[u8; 231] = &[
 /// Definition for each "pseudo-critical band"
 pub(crate) const NB_E_BANDS: usize = 21;
 
-pub(crate) const E_BANDS: &[u8] = &[
+pub(crate) const E_BANDS: &[u8; 22] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 34, 40, 48, 60, 78, 100,
 ];
 
