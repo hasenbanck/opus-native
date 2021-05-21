@@ -1,66 +1,19 @@
 //! Implements the only mode that Celt supports. Custom modes are not supported.
 
-/// Mode configuration for the default and only mode of Celt.
-#[derive(Clone, Debug)]
-pub(crate) struct Mode {
-    pub(crate) fs: u32,
-    pub(crate) overlap: usize,
-    pub(crate) nb_ebands: usize,
-    pub(crate) eff_bands: usize,
-    pub(crate) preemph: [f32; 4],
-    // Definition for each "pseudo-critical band"
-    pub(crate) e_bands: &'static [u8],
+pub(crate) const SAMPLING_RATE: u32 = 48000;
+pub(crate) const OVERLAP: usize = 120;
+pub(crate) const EFF_E_BANDS: usize = 21;
+pub(crate) const MAX_LM: usize = 3;
+pub(crate) const NB_SHORT_MDCTS: usize = 8;
+pub(crate) const SHORT_MDCT_SIZE: usize = 120;
 
-    pub(crate) max_lm: usize,
-    pub(crate) nb_short_mdcts: usize,
-    pub(crate) short_mdct_size: usize,
+pub(crate) const PREEMPH: &[f32; 4] = &[0.8500061, 0.0, 1.0, 1.0];
 
-    // Number of lines in the matrix below.
-    pub(crate) nb_alloc_vectors: usize,
-    // Number of bits in each band for several rates
-    pub(crate) alloc_vectors: &'static [u8],
-    pub(crate) log_n: &'static [u8],
+/// Number of lines in the matrix below.
+pub(crate) const NB_ALLOC_VECTORS: usize = 11;
 
-    pub(crate) window: &'static [f32],
-    pub(crate) cache: PulseCache,
-}
-
-/// Pulse cache.
-#[derive(Clone, Debug)]
-pub(crate) struct PulseCache {
-    pub(crate) size: usize,
-    pub(crate) index: &'static [i16],
-    pub(crate) bits: &'static [u8],
-    pub(crate) caps: &'static [u8],
-}
-
-impl Default for Mode {
-    fn default() -> Self {
-        Self {
-            fs: 48000,
-            overlap: 120,
-            nb_ebands: 21,
-            eff_bands: 21,
-            preemph: [0.8500061, 0.0, 1.0, 1.0],
-            e_bands: E_BAND,
-            max_lm: 3,
-            nb_short_mdcts: 8,
-            short_mdct_size: 120,
-            nb_alloc_vectors: 11,
-            alloc_vectors: ALLOC_VECTORS,
-            log_n: LOG_N,
-            window: WINDOW,
-            cache: PulseCache {
-                size: 392,
-                index: CACHE_INDEX,
-                bits: CACHE_BITS,
-                caps: CACHE_CAPS,
-            },
-        }
-    }
-}
-
-const ALLOC_VECTORS: &[u8] = &[
+/// Bit allocation table in units of 1/32 bit/sample (0.1875 dB SNR).
+pub(crate) const ALLOC_VECTORS: &[u8; 231] = &[
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 90, 80, 75, 69, 63, 56, 49, 40,
     34, 29, 20, 18, 10, 0, 0, 0, 0, 0, 0, 0, 0, 110, 100, 90, 84, 78, 71, 65, 58, 51, 45, 39, 32,
     26, 20, 12, 0, 0, 0, 0, 0, 0, 118, 110, 103, 93, 86, 80, 75, 70, 65, 59, 53, 47, 40, 31, 23,
@@ -74,17 +27,20 @@ const ALLOC_VECTORS: &[u8] = &[
     104,
 ];
 
-const E_BAND: &[u8] = &[
+/// Definition for each "pseudo-critical band"
+pub(crate) const NB_E_BANDS: usize = 21;
+
+pub(crate) const E_BANDS: &[u8] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 34, 40, 48, 60, 78, 100,
 ];
 
-const LOG_N: &[u8] = &[
+pub(crate) const LOG_N: &[u8; 21] = &[
     0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8, 16, 16, 16, 21, 21, 24, 29, 34, 36,
 ];
 
 #[rustfmt::skip]
 #[allow(clippy::excessive_precision)]
-const WINDOW: &[f32] = &[
+pub(crate) const WINDOW: &[f32; 120] = &[
     6.7286966e-05, 0.00060551348, 0.0016815970, 0.0032947962, 0.0054439943,
     0.0081276923, 0.011344001, 0.015090633, 0.019364886, 0.024163635,
     0.029483315, 0.035319905, 0.041668911, 0.048525347, 0.055883718,
@@ -111,7 +67,7 @@ const WINDOW: &[f32] = &[
     0.99998518, 0.99999457, 0.99999859, 0.99999982, 1.0000000
 ];
 
-const CACHE_INDEX: &[i16] = &[
+pub(crate) const CACHE_INDEX: &[i16; 105] = &[
     -1, -1, -1, -1, -1, -1, -1, -1, 0, 0, 0, 0, 41, 41, 41, 82, 82, 123, 164, 200, 222, 0, 0, 0, 0,
     0, 0, 0, 0, 41, 41, 41, 41, 123, 123, 123, 164, 164, 240, 266, 283, 295, 41, 41, 41, 41, 41,
     41, 41, 41, 123, 123, 123, 123, 240, 240, 240, 266, 266, 305, 318, 328, 336, 123, 123, 123,
@@ -120,7 +76,7 @@ const CACHE_INDEX: &[i16] = &[
     387,
 ];
 
-const CACHE_BITS: &[u8] = &[
+pub(crate) const CACHE_BITS: &[u8; 392] = &[
     40, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
     7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 40, 15, 23, 28, 31, 34, 36, 38, 39, 41, 42, 43, 44, 45, 46, 47,
     47, 49, 50, 51, 52, 53, 54, 55, 55, 57, 58, 59, 60, 61, 62, 63, 63, 65, 66, 67, 68, 69, 70, 71,
@@ -142,7 +98,7 @@ const CACHE_BITS: &[u8] = &[
     224, 4, 67, 127, 182, 234,
 ];
 
-const CACHE_CAPS: &[u8] = &[
+pub(crate) const CACHE_CAPS: &[u8; 168] = &[
     224, 224, 224, 224, 224, 224, 224, 224, 160, 160, 160, 160, 185, 185, 185, 178, 178, 168, 134,
     61, 37, 224, 224, 224, 224, 224, 224, 224, 224, 240, 240, 240, 240, 207, 207, 207, 198, 198,
     183, 144, 66, 40, 160, 160, 160, 160, 160, 160, 160, 160, 185, 185, 185, 185, 193, 193, 193,
