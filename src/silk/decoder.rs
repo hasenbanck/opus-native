@@ -1,7 +1,7 @@
 //! Implements the Silk decoder.
 
 use crate::range_coder::RangeDecoder;
-use crate::{Channels, DecoderError, SamplingRate};
+use crate::{Channels, OpusError, SamplingRate};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum LostFlag {
@@ -26,10 +26,7 @@ pub(crate) struct SilkDecoder {
 
 impl SilkDecoder {
     /// Creates a new Silk decoder. Configures the output sampling rate and output channels.
-    pub(crate) fn new(
-        sampling_rate: SamplingRate,
-        channels: Channels,
-    ) -> Result<Self, DecoderError> {
+    pub(crate) fn new(sampling_rate: SamplingRate, channels: Channels) -> Result<Self, OpusError> {
         // TODO
         Ok(Self {
             sampling_rate,
@@ -41,7 +38,7 @@ impl SilkDecoder {
     }
 
     /// Resets the Silk decoder.
-    pub(crate) fn reset(&mut self) -> Result<(), DecoderError> {
+    pub(crate) fn reset(&mut self) -> Result<(), OpusError> {
         unimplemented!()
     }
 
@@ -78,7 +75,7 @@ impl SilkDecoder {
         frame_size: &mut usize,
         lost_flag: LostFlag,
         first_frame: bool,
-    ) -> Result<(), DecoderError> {
+    ) -> Result<(), OpusError> {
         unimplemented!()
     }
 }

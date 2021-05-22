@@ -136,8 +136,8 @@
 //!          by Thomas R. Fischer (1986).
 //!
 
-use crate::encoder_error::EncoderError;
 use crate::range_coder::{RangeDecoder, RangeEncoder};
+use crate::OpusError;
 
 /// Encodes a pulse vector to an integer index using the pulse vector coding.
 pub(crate) fn encode_pulses(
@@ -145,7 +145,7 @@ pub(crate) fn encode_pulses(
     y: &[i32],
     n: u32,
     k: u32,
-) -> Result<(), EncoderError> {
+) -> Result<(), OpusError> {
     debug_assert!(k > 0);
     let fl = icwrs(y, n);
     let ft = pvq_v(n, k);

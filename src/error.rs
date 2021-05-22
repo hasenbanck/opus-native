@@ -1,43 +1,43 @@
-//! Decoder errors.
+//! Custom errors.
 
-/// Errors thrown by the decoder.
+/// Errors thrown by the decoder / encoder.
 #[derive(Debug)]
-pub enum DecoderError {
+pub enum OpusError {
     /// Bad arguments.
     BadArguments(&'static str),
     /// Invalid packet.
     InvalidPacket,
     /// Frame size is too small for the packet.
     FrameSizeTooSmall,
-    /// The sample buffer is too small.
+    /// The buffer is too small.
     BufferToSmall,
-    /// An internal decoder error.
+    /// An internal error.
     InternalError(&'static str),
 }
 
-impl std::fmt::Display for DecoderError {
+impl std::fmt::Display for OpusError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DecoderError::BadArguments(message) => {
+            OpusError::BadArguments(message) => {
                 write!(f, "{}", message)
             }
-            DecoderError::InternalError(message) => {
+            OpusError::InternalError(message) => {
                 write!(f, "{}", message)
             }
-            DecoderError::BufferToSmall => {
-                write!(f, "Sample buffer is too small")
+            OpusError::BufferToSmall => {
+                write!(f, "buffer is too small")
             }
-            DecoderError::FrameSizeTooSmall => {
+            OpusError::FrameSizeTooSmall => {
                 write!(f, "the frame size is too small for the packet")
             }
-            DecoderError::InvalidPacket => {
+            OpusError::InvalidPacket => {
                 write!(f, "invalid packet")
             }
         }
     }
 }
 
-impl std::error::Error for DecoderError {
+impl std::error::Error for OpusError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         None
     }

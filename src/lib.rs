@@ -26,15 +26,14 @@
 //! * Good loss robustness and packet loss concealment (PLC)
 //!
 pub use decoder::*;
-pub use decoder_error::*;
 pub use encoder::*;
 pub use encoder::*;
+pub use error::*;
 
 pub(crate) mod celt;
 mod decoder;
-mod decoder_error;
 mod encoder;
-mod encoder_error;
+mod error;
 pub(crate) mod math;
 #[cfg(feature = "ogg")]
 mod ogg;
@@ -226,7 +225,7 @@ pub fn query_packet_channel_count(packet: &[u8]) -> Channels {
 /// # Arguments
 /// * `packet` - Input payload.
 ///
-pub fn query_packet_frame_count(packet: &[u8]) -> Result<usize, DecoderError> {
+pub fn query_packet_frame_count(packet: &[u8]) -> Result<usize, OpusError> {
     debug_assert!(!packet.is_empty());
 
     let count = packet[0] & 0x3;
@@ -235,7 +234,7 @@ pub fn query_packet_frame_count(packet: &[u8]) -> Result<usize, DecoderError> {
     } else if count != 3 {
         Ok(2)
     } else if packet.len() < 2 {
-        Err(DecoderError::InvalidPacket)
+        Err(OpusError::InvalidPacket)
     } else {
         Ok((packet[1] & 0x3F) as usize)
     }
@@ -278,11 +277,11 @@ pub fn query_packet_samples_per_frame(packet: &[u8], sampling_rate: SamplingRate
 pub fn query_packet_sample_count(
     packet: &[u8],
     sampling_rate: SamplingRate,
-) -> Result<usize, DecoderError> {
+) -> Result<usize, OpusError> {
     let count = query_packet_frame_count(packet)?;
     let samples = count * query_packet_samples_per_frame(packet, sampling_rate);
     if samples * 25 > sampling_rate as usize * 3 {
-        Err(DecoderError::InvalidPacket)
+        Err(OpusError::InvalidPacket)
     } else {
         Ok(samples)
     }
@@ -328,7 +327,7 @@ pub fn parse_packet(
     sizes: &mut [usize; 48],
     payload_offset: Option<&mut usize>,
     packet_offset: Option<&mut usize>,
-) -> Result<usize, DecoderError> {
+) -> Result<usize, OpusError> {
     let framesize = query_packet_samples_per_frame(packet, SamplingRate::Hz48000);
     let mut offset = 1;
     let mut len = packet.len() - offset;
@@ -349,7 +348,7 @@ pub fn parse_packet(
 
             if !self_delimited {
                 if len & 0x1 == 1 {
-                    return Err(DecoderError::InvalidPacket);
+                    return Err(OpusError::InvalidPacket);
                 }
                 last_size = len / 2;
                 // If last_size doesn't fit in size[0], we'll catch it later.
@@ -362,7 +361,7 @@ pub fn parse_packet(
             let bytes = parse_size(&packet[offset..], &mut sizes[0])?;
             len -= bytes;
             if sizes[0] > len {
-                return Err(DecoderError::InvalidPacket);
+                return Err(OpusError::InvalidPacket);
             }
             offset += bytes;
             last_size = len - sizes[0];
@@ -370,7 +369,7 @@ pub fn parse_packet(
         3 => {
             // Multiple CBR/VBR frames (from 0 to 120 ms).
             if len < 1 {
-                return Err(DecoderError::InvalidPacket);
+                return Err(OpusError::InvalidPacket);
             }
             // Number of frames encoded in bits 0 to 5.
             let ch = usize::from(packet[offset]);
@@ -378,7 +377,7 @@ pub fn parse_packet(
 
             count = ch & 0x3F;
             if framesize * count > 5760 {
-                return Err(DecoderError::InvalidPacket);
+                return Err(OpusError::InvalidPacket);
             }
             len -= 1;
 
@@ -405,7 +404,7 @@ pub fn parse_packet(
                     let bytes = parse_size(&packet[offset..], &mut sizes[i])?;
                     len -= bytes;
                     if sizes[i] > len {
-                        return Err(DecoderError::InvalidPacket);
+                        return Err(OpusError::InvalidPacket);
                     }
                     offset += bytes;
                     last_size -= bytes + sizes[i];
@@ -416,7 +415,7 @@ pub fn parse_packet(
                 // CBR case.
                 last_size = len / count;
                 if last_size * count != len {
-                    return Err(DecoderError::InvalidPacket);
+                    return Err(OpusError::InvalidPacket);
                 }
                 (0..count - 1).into_iter().for_each(|i| {
                     sizes[i] = last_size;
@@ -433,26 +432,26 @@ pub fn parse_packet(
         let bytes = parse_size(&packet[offset..], &mut sizes[count - 1])?;
         len -= bytes;
         if sizes[count - 1] > len {
-            return Err(DecoderError::InvalidPacket);
+            return Err(OpusError::InvalidPacket);
         }
         offset += bytes;
         // For CBR packets, apply the size to all the frames.
         if cbr {
             if sizes[count - 1] * count > len {
-                return Err(DecoderError::InvalidPacket);
+                return Err(OpusError::InvalidPacket);
             }
             (0..count - 1).into_iter().for_each(|i| {
                 sizes[i] = sizes[count - 1];
             });
         } else if bytes + sizes[count - 1] > last_size {
-            return Err(DecoderError::InvalidPacket);
+            return Err(OpusError::InvalidPacket);
         }
     } else {
         // Because it's not encoded explicitly, it's possible the size of the
         // last packet (or all the packets, for the CBR case) is larger than
         // 1275. Reject them here.
         if last_size > 1275 {
-            return Err(DecoderError::InvalidPacket);
+            return Err(OpusError::InvalidPacket);
         }
         sizes[count - 1] = last_size;
     }
@@ -476,14 +475,14 @@ pub fn parse_packet(
     Ok(count)
 }
 
-fn parse_size(data: &[u8], size: &mut usize) -> Result<usize, DecoderError> {
+fn parse_size(data: &[u8], size: &mut usize) -> Result<usize, OpusError> {
     if data.is_empty() {
-        Err(DecoderError::InvalidPacket)
+        Err(OpusError::InvalidPacket)
     } else if data[0] < 252 {
         *size = data[0] as usize;
         Ok(1)
     } else if data.len() < 2 {
-        Err(DecoderError::InvalidPacket)
+        Err(OpusError::InvalidPacket)
     } else {
         *size = 4 * usize::from(data[1]) + usize::from(data[0]);
         Ok(2)

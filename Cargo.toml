@@ -14,7 +14,5 @@ edition = "2018"
 default = ["ogg"]
 ogg = []
 
-[dependencies]
-
 [dev-dependencies]
 nanorand = { version = "0.5", default-features = true, features = ["wyrand"] }

@@ -2,7 +2,7 @@
 
 use crate::celt::mode;
 use crate::range_coder::RangeDecoder;
-use crate::{Channels, DecoderError, SamplingRate};
+use crate::{Channels, OpusError, SamplingRate};
 
 /// The Celt decoder.
 #[derive(Clone, Debug)]
@@ -19,10 +19,7 @@ pub(crate) struct CeltDecoder {
 
 impl CeltDecoder {
     /// Creates a new Celt decoder.
-    pub(crate) fn new(
-        _sampling_rate: SamplingRate,
-        channels: Channels,
-    ) -> Result<Self, DecoderError> {
+    pub(crate) fn new(_sampling_rate: SamplingRate, channels: Channels) -> Result<Self, OpusError> {
         // TODO Port opus_custom_decoder_init
         // TODO calculate and set downsample
 
@@ -37,7 +34,7 @@ impl CeltDecoder {
     }
 
     /// Resets the Celt decoder.
-    pub(crate) fn reset(&mut self) -> Result<(), DecoderError> {
+    pub(crate) fn reset(&mut self) -> Result<(), OpusError> {
         // TODO this shouldn't reset any buffers, if we allocate any, since we could reset every packet.
         todo!()
     }

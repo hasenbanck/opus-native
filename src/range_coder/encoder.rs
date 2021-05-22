@@ -1,10 +1,10 @@
 //! Implements the range encoder.
-use crate::encoder_error::EncoderError;
 use crate::math::ilog;
 use crate::range_coder::{
     get_lapace_freq, Tell, CODE_BITS, CODE_BOT, CODE_SHIFT, CODE_TOP, SYM_BITS, SYM_MAX, UINT_BITS,
     WINDOW_SIZE,
 };
+use crate::OpusError;
 
 /// The range encoder.
 pub(crate) struct RangeEncoder<'e> {
@@ -88,9 +88,9 @@ impl<'e> RangeEncoder<'e> {
     }
 
     /// Writes a byte from front to back.
-    fn write_byte(&mut self, value: u8) -> Result<(), EncoderError> {
+    fn write_byte(&mut self, value: u8) -> Result<(), OpusError> {
         if self.offs + self.end_offs >= self.storage {
-            return Err(EncoderError::BufferToSmall);
+            return Err(OpusError::BufferToSmall);
         }
         self.buffer[self.offs] = value;
         self.offs += 1;
@@ -99,9 +99,9 @@ impl<'e> RangeEncoder<'e> {
     }
 
     /// Writes a byte from back to front.
-    fn write_byte_at_end(&mut self, value: u8) -> Result<(), EncoderError> {
+    fn write_byte_at_end(&mut self, value: u8) -> Result<(), OpusError> {
         if self.offs + self.end_offs >= self.storage {
-            return Err(EncoderError::BufferToSmall);
+            return Err(OpusError::BufferToSmall);
         }
         self.end_offs += 1;
         self.buffer[self.storage - self.end_offs] = value;
@@ -121,7 +121,7 @@ impl<'e> RangeEncoder<'e> {
     ///
     /// The alternative is to truncate the range in order to force a carry, but
     /// requires similar carry tracking in the decoder, needlessly slowing it down.
-    fn carry_out(&mut self, c: u32) -> Result<(), EncoderError> {
+    fn carry_out(&mut self, c: u32) -> Result<(), OpusError> {
         if c != SYM_MAX {
             // No further carry propagation possible, flush buffer.
             let carry = c >> SYM_BITS;
@@ -154,7 +154,7 @@ impl<'e> RangeEncoder<'e> {
 
     /// Normalizes the contents of val and range so that range lies entirely
     /// in the high-order symbol.
-    fn normalize(&mut self) -> Result<(), EncoderError> {
+    fn normalize(&mut self) -> Result<(), OpusError> {
         // If the range is too small, output some bits and rescale it.
         while self.rng <= CODE_BOT {
             self.carry_out(self.val >> CODE_SHIFT)?;
@@ -184,7 +184,7 @@ impl<'e> RangeEncoder<'e> {
     ///          which the decoded value will fall.
     /// * `ft` - The sum of the frequencies of all the symbols.
     ///
-    pub(crate) fn encode(&mut self, fl: u32, fh: u32, ft: u32) -> Result<(), EncoderError> {
+    pub(crate) fn encode(&mut self, fl: u32, fh: u32, ft: u32) -> Result<(), OpusError> {
         let r = self.rng / ft;
         if fl > 0 {
             self.val += self.rng - (r * (ft - fl));
@@ -198,7 +198,7 @@ impl<'e> RangeEncoder<'e> {
     }
 
     /// Equivalent to encode() with `ft == 1 << bits`.
-    pub(crate) fn encode_bin(&mut self, fl: u32, fh: u32, bits: u32) -> Result<(), EncoderError> {
+    pub(crate) fn encode_bin(&mut self, fl: u32, fh: u32, bits: u32) -> Result<(), OpusError> {
         let r = self.rng >> bits;
         if fl > 0 {
             self.val += self.rng - (r * ((1 << bits) - fl));
@@ -212,7 +212,7 @@ impl<'e> RangeEncoder<'e> {
     }
 
     /// Encode a bit that has a `1/(1<<logp)` probability of being a one.
-    pub(crate) fn encode_bit_logp(&mut self, val: u32, logp: u32) -> Result<(), EncoderError> {
+    pub(crate) fn encode_bit_logp(&mut self, val: u32, logp: u32) -> Result<(), OpusError> {
         let mut r = self.rng;
         let l = self.val;
         let s = r >> logp;
@@ -236,12 +236,7 @@ impl<'e> RangeEncoder<'e> {
     ///            must be 0.
     /// * `ftb`  - The number of bits of precision in the cumulative distribution.
     ///
-    pub(crate) fn encode_icdf(
-        &mut self,
-        s: usize,
-        icdf: &[u8],
-        ftb: u32,
-    ) -> Result<(), EncoderError> {
+    pub(crate) fn encode_icdf(&mut self, s: usize, icdf: &[u8], ftb: u32) -> Result<(), OpusError> {
         let r = self.rng >> ftb;
         if s > 0 {
             self.val += self.rng - (r * u32::from(icdf[s - 1]));
@@ -260,7 +255,7 @@ impl<'e> RangeEncoder<'e> {
     /// * `fl` - The integer to encode.
     /// * `ft` - The number of integers that can be encoded (one more than the max).
     ///          This must be at least 2, and no more than 2**32-1.
-    pub(crate) fn encode_uint(&mut self, fl: u32, mut ft: u32) -> Result<(), EncoderError> {
+    pub(crate) fn encode_uint(&mut self, fl: u32, mut ft: u32) -> Result<(), OpusError> {
         // In order to optimize log(), it is undefined for the value 0.
         debug_assert!(ft > 1);
         ft -= 1;
@@ -284,7 +279,7 @@ impl<'e> RangeEncoder<'e> {
     /// * `fl`   - The bits to encode.
     /// * `bits` - The number of bits to encode.
     ///            This must be between 1 and 25, inclusive.
-    pub(crate) fn encode_bits(&mut self, fl: u32, bits: u32) -> Result<(), EncoderError> {
+    pub(crate) fn encode_bits(&mut self, fl: u32, bits: u32) -> Result<(), OpusError> {
         debug_assert!(bits > 0);
         let mut window = self.end_window;
         let mut used = self.end_bits;
@@ -329,7 +324,7 @@ impl<'e> RangeEncoder<'e> {
     /// * `nbits` - The number of bits to overwrite.
     ///            This must be no more than 8.
     ///
-    pub(crate) fn patch_initial_bits(&mut self, val: u32, nbits: u32) -> Result<(), EncoderError> {
+    pub(crate) fn patch_initial_bits(&mut self, val: u32, nbits: u32) -> Result<(), OpusError> {
         debug_assert!(nbits <= SYM_BITS);
         let shift = SYM_BITS - nbits;
         let mask = ((1 << nbits) - 1) << shift;
@@ -343,7 +338,7 @@ impl<'e> RangeEncoder<'e> {
             // The renormalization loop has never been run.
             self.val = (self.val & !(mask << CODE_SHIFT)) | val << (CODE_SHIFT + shift);
         } else {
-            return Err(EncoderError::InternalError(
+            return Err(OpusError::InternalError(
                 "the encoder hasn't even encoded nbits of data yet",
             ));
         }
@@ -378,7 +373,7 @@ impl<'e> RangeEncoder<'e> {
     /// All remaining output bytes are flushed to the output buffer.
     ///
     /// `reset()` must be called before the encoder can be used again.
-    pub(crate) fn done(&mut self) -> Result<(), EncoderError> {
+    pub(crate) fn done(&mut self) -> Result<(), OpusError> {
         // We output the minimum number of bits that ensures that the symbols encoded
         // thus far will be decoded correctly regardless of the bits that follow.
         let mut l: i32 = (CODE_BITS - ilog(self.rng)) as i32;
@@ -414,7 +409,7 @@ impl<'e> RangeEncoder<'e> {
         if used > 0 {
             // If there's no range coder data at all, give up.
             if self.end_offs >= self.storage {
-                return Err(EncoderError::InternalError("no range coder data"));
+                return Err(OpusError::InternalError("no range coder data"));
             } else {
                 l = -l;
                 // If we've busted, don't add too many extra bits to the last byte; it
@@ -444,7 +439,7 @@ impl<'e> RangeEncoder<'e> {
         value: &mut i32,
         fs: u32,
         decay: u32,
-    ) -> Result<(), EncoderError> {
+    ) -> Result<(), OpusError> {
         let mut fs = fs;
         let mut val = *value;
         let mut fl = 0;

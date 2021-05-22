@@ -7,11 +7,11 @@ use crate::celt::CeltDecoder;
 use crate::math::fast_exp2;
 use crate::range_coder::{RangeDecoder, Tell};
 use crate::silk::{LostFlag, SilkDecoder};
-use crate::DecoderError::FrameSizeTooSmall;
+use crate::OpusError::FrameSizeTooSmall;
 use crate::{
     parse_packet, pcm_soft_clip, query_packet_bandwidth, query_packet_channel_count,
     query_packet_codec_mode, query_packet_sample_count, query_packet_samples_per_frame, Bandwidth,
-    Channels, CodecMode, DecoderError, Sample, SamplingRate,
+    Channels, CodecMode, OpusError, Sample, SamplingRate,
 };
 
 /// Configures the decoder on creation.
@@ -58,7 +58,7 @@ pub struct Decoder {
 
 impl Decoder {
     /// Creates a new `Decoder` with the given configuration.
-    pub(crate) fn new(configuration: &DecoderConfiguration) -> Result<Self, DecoderError> {
+    pub(crate) fn new(configuration: &DecoderConfiguration) -> Result<Self, OpusError> {
         let inner = DecoderInner::new(configuration)?;
         Ok(Self {
             inner,
@@ -71,7 +71,7 @@ impl Decoder {
     /// This should be called when switching streams in order to prevent
     /// the back to back decoding from giving different results from
     /// one at a time decoding.
-    pub(crate) fn reset(&mut self) -> Result<(), DecoderError> {
+    pub(crate) fn reset(&mut self) -> Result<(), OpusError> {
         self.buffer = vec![];
         self.inner.reset()
     }
@@ -151,13 +151,13 @@ impl Decoder {
         samples: &mut [S],
         frame_size: NonZeroUsize,
         decode_fec: bool,
-    ) -> Result<usize, DecoderError> {
+    ) -> Result<usize, OpusError> {
         let mut frame_size = frame_size.get();
         if !decode_fec {
             if let Some(packet) = packet {
                 let sample_count = query_packet_sample_count(&packet, self.inner.sampling_rate)?;
                 if sample_count == 0 {
-                    return Err(DecoderError::InvalidPacket);
+                    return Err(OpusError::InvalidPacket);
                 }
                 frame_size = usize::min(frame_size, sample_count);
             }
@@ -179,7 +179,7 @@ impl Decoder {
 
         if sample_count != 0 {
             if sample_count > samples.len() {
-                return Err(DecoderError::BufferToSmall);
+                return Err(OpusError::BufferToSmall);
             }
 
             (0..sample_count * self.inner.channels as usize)
@@ -219,7 +219,7 @@ impl Decoder {
         samples: &mut [f32],
         frame_size: NonZeroUsize,
         decode_fec: bool,
-    ) -> Result<usize, DecoderError> {
+    ) -> Result<usize, OpusError> {
         let (sample_count, _) = self.inner.decode_native(
             &packet,
             samples,
@@ -258,7 +258,7 @@ struct DecoderInner {
 }
 
 impl DecoderInner {
-    fn new(configuration: &DecoderConfiguration) -> Result<Self, DecoderError> {
+    fn new(configuration: &DecoderConfiguration) -> Result<Self, OpusError> {
         let celt_dec = CeltDecoder::new(configuration.sampling_rate, configuration.channels)?;
         let silk_dec = SilkDecoder::new(configuration.sampling_rate, configuration.channels)?;
 
@@ -283,7 +283,7 @@ impl DecoderInner {
         })
     }
 
-    fn reset(&mut self) -> Result<(), DecoderError> {
+    fn reset(&mut self) -> Result<(), OpusError> {
         self.silk_dec.reset()?;
         self.celt_dec.reset()?;
 
@@ -311,17 +311,17 @@ impl DecoderInner {
         decode_fec: bool,
         self_delimited: bool,
         soft_clip: bool,
-    ) -> Result<(usize, usize), DecoderError> {
+    ) -> Result<(usize, usize), OpusError> {
         // The frame_size has to be to have a multiple of 2.5 ms.
         if frame_size % (self.sampling_rate as usize / 400) != 0 {
-            return Err(DecoderError::BadArguments(
+            return Err(OpusError::BadArguments(
                 "frame_size must be a multiple of 2.5 ms of the sampling rate",
             ));
         }
 
         if let Some(packet) = packet {
             if packet.is_empty() {
-                return Err(DecoderError::BadArguments("packet is empty"));
+                return Err(OpusError::BadArguments("packet is empty"));
             }
             let mut offset = 0;
             let mut packet_offset = 0;
@@ -407,7 +407,7 @@ impl DecoderInner {
 
                     offset += self.frame_sizes[i];
                     sample_count += count;
-                    Ok::<(), DecoderError>(())
+                    Ok::<(), OpusError>(())
                 })?;
 
                 self.last_packet_duration = Some(sample_count);
@@ -448,7 +448,7 @@ impl DecoderInner {
         samples: &mut [f32],
         mut frame_size: usize,
         decode_fec: bool,
-    ) -> Result<usize, DecoderError> {
+    ) -> Result<usize, OpusError> {
         let mut redundancy = false;
         let mut redundancy_bytes = 0;
         let mut celt_to_silk = false;
@@ -460,7 +460,7 @@ impl DecoderInner {
         let f5 = f10 >> 1;
         let f2_5 = f5 >> 1;
         if frame_size < f2_5 {
-            return Err(DecoderError::FrameSizeTooSmall);
+            return Err(OpusError::FrameSizeTooSmall);
         }
 
         // Payloads of 1 (2 including ToC) or 0 trigger the PLC/DTX.
@@ -543,7 +543,7 @@ impl DecoderInner {
         }
 
         if audiosize > frame_size {
-            return Err(DecoderError::FrameSizeTooSmall);
+            return Err(OpusError::FrameSizeTooSmall);
         } else {
             frame_size = audiosize;
         }
@@ -579,7 +579,7 @@ impl DecoderInner {
                             .set_internal_sampling_rate(SamplingRate::Hz16000);
                     } else {
                         // The specification states that SILK is only used up until wideband.
-                        return Err(DecoderError::InvalidPacket);
+                        return Err(OpusError::InvalidPacket);
                     }
                 } else {
                     // Hybrid mode.

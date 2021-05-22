@@ -1,6 +1,5 @@
 use std::f32::consts::{LN_2, LOG2_E, PI};
 use std::mem::size_of;
-use std::ops::{Add, Mul, Sub};
 
 /// The minimum number of bits required to store a positive integer in binary, or 0 for a non-positive integer.
 #[inline(always)]
