@@ -21,16 +21,15 @@ fn resampling_factor(rate: SamplingRate) -> u32 {
     }
 }
 
-#[allow(clippy::excessive_precision)]
 const GAINS: [f32; 9] = [
-    0.306640625,
-    0.2170410156,
-    0.1296386719,
-    0.4638671875,
-    0.2680664062,
+    0.30664063,
+    0.21704102,
+    0.12963867,
+    0.4638672,
+    0.2680664,
     0.0,
-    0.7998046875,
-    0.1000976562,
+    0.7998047,
+    0.100097656,
     0.0,
 ];
 
@@ -202,8 +201,8 @@ fn comb_filter_const(
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[inline(always)]
-#[allow(clippy::too_many_arguments)]
 #[allow(unsafe_code)]
+#[allow(clippy::too_many_arguments)]
 fn comb_filter_const(
     y: &mut [f32],
     y_offset: usize,
