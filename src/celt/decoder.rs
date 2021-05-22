@@ -39,11 +39,6 @@ impl CeltDecoder {
         todo!()
     }
 
-    /// Returns the window.
-    pub(crate) fn window(&self) -> &[f32] {
-        mode::WINDOW
-    }
-
     /// Gets the pitch of the last decoded frame.
     pub(crate) fn pitch(&self) -> u32 {
         todo!()

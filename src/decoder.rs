@@ -3,7 +3,7 @@
 use std::cmp::Ordering;
 use std::num::NonZeroUsize;
 
-use crate::celt::CeltDecoder;
+use crate::celt::{mode, CeltDecoder};
 use crate::math::fast_exp2;
 use crate::range_coder::{RangeDecoder, Tell};
 use crate::silk::{LostFlag, SilkDecoder};
@@ -737,7 +737,6 @@ impl DecoderInner {
                 &self.redundant_audio[self.channels as usize * f2_5..],
                 f2_5,
                 self.channels as usize,
-                self.celt_dec.window(),
                 self.sampling_rate as usize,
             );
         }
@@ -754,7 +753,6 @@ impl DecoderInner {
                 &samples[self.channels as usize * f2_5..],
                 f2_5,
                 self.channels as usize,
-                &self.celt_dec.window(),
                 self.sampling_rate as usize,
             );
         }
@@ -771,7 +769,6 @@ impl DecoderInner {
                     &mut samples[self.channels as usize * f2_5..],
                     f2_5,
                     self.channels as usize,
-                    self.celt_dec.window(),
                     self.sampling_rate as usize,
                 );
             } else {
@@ -785,7 +782,6 @@ impl DecoderInner {
                     samples,
                     f2_5,
                     self.channels as usize,
-                    self.celt_dec.window(),
                     self.sampling_rate as usize,
                 );
             }
@@ -839,13 +835,12 @@ fn smooth_fade_into_in1(
     in2: &[f32],
     overlap: usize,
     channels: usize,
-    window: &[f32],
     sampling_rate: usize,
 ) {
     let inc = 48000 / sampling_rate;
     (0..channels).into_iter().for_each(|c| {
         (0..overlap).into_iter().for_each(|i| {
-            let w = window[i * inc] * window[i * inc];
+            let w = mode::WINDOW[i * inc] * mode::WINDOW[i * inc];
             in1[c + i * channels] =
                 (w * in2[i * channels + c]) + ((1.0 - w) * in1[i * channels + c]);
         });
@@ -857,13 +852,12 @@ fn smooth_fade_into_in2(
     in2: &mut [f32],
     overlap: usize,
     channels: usize,
-    window: &[f32],
     sampling_rate: usize,
 ) {
     let inc = 48000 / sampling_rate;
     (0..channels).into_iter().for_each(|c| {
         (0..overlap).into_iter().for_each(|i| {
-            let w = window[i * inc] * window[i * inc];
+            let w = mode::WINDOW[i * inc] * mode::WINDOW[i * inc];
             in2[c + i * channels] =
                 (w * in2[i * channels + c]) + ((1.0 - w) * in1[i * channels + c]);
         });
