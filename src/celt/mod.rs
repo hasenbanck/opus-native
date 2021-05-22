@@ -34,7 +34,7 @@ const GAINS: [f32; 9] = [
 ];
 
 #[allow(clippy::too_many_arguments)]
-#[warn(clippy::many_single_char_names)]
+#[allow(clippy::many_single_char_names)]
 pub(crate) fn comb_filter(
     y: &mut [f32],
     y_offset: usize,
@@ -174,6 +174,7 @@ pub(crate) fn comb_filter_inplace(
 #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::many_single_char_names)]
 fn comb_filter_const(
     y: &mut [f32],
     y_offset: usize,
