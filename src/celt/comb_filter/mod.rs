@@ -2,19 +2,39 @@
 
 use crate::celt::mode;
 
+//mod avx;
+
 #[cfg(not(any(
-    all(target_arch = "x86", target_feature = "sse"),
-    all(target_arch = "x86_64", target_feature = "sse"),
+    all(
+        target_arch = "x86",
+        any(target_feature = "sse", target_feature = "avx")
+    ),
+    all(
+        target_arch = "x86_64",
+        any(target_feature = "sse", target_feature = "avx")
+    ),
     all(target_arch = "arm", target_feature = "neon", feature = "nightly"),
     all(target_arch = "aarch64", target_feature = "neon", feature = "nightly")
 )))]
 submodule!(pub(crate) fallback);
 
 #[cfg(any(
-    all(target_arch = "x86", target_feature = "sse"),
-    all(target_arch = "x86_64", target_feature = "sse")
+    all(
+        target_arch = "x86",
+        all(target_feature = "sse", not(target_feature = "avx"))
+    ),
+    all(
+        target_arch = "x86_64",
+        all(target_feature = "sse", not(target_feature = "avx"))
+    ),
 ))]
 submodule!(pub(crate) sse);
+
+#[cfg(any(
+    all(target_arch = "x86", target_feature = "avx"),
+    all(target_arch = "x86_64", target_feature = "avx")
+))]
+submodule!(pub(crate) avx);
 
 #[cfg(any(
     all(target_arch = "arm", target_feature = "neon", feature = "nightly"),
@@ -182,13 +202,28 @@ mod tests {
     const T1: usize = 30;
     const G0: f32 = 0.0;
     const G1: f32 = 0.75;
-    const SIZE: usize = 48;
-    const N: usize = 16;
+    const SIZE: usize = 256;
+    const N: usize = 64;
     const OVERLAP: usize = 4;
 
-    const TEST_VECTOR: &[f32; N] = &[
-        32.0, 33.0, 34.00001, 35.000042, 40.5, 42.25, 44.0, 45.75, 47.5, 49.25, 51.0, 52.75, 54.5,
-        56.25, 58.0, 59.75,
+    const TEST_VECTOR1: &[f32; N] = &[
+        192.0, 193.00005, 194.00035, 195.00134, 320.5, 322.25, 324.0, 325.75, 327.5, 329.25, 331.0,
+        332.75, 334.5, 336.25, 338.0, 339.75, 341.5, 343.25, 345.0, 346.75, 348.5, 350.25, 352.0,
+        353.75, 355.5, 357.25, 359.0, 360.75, 362.5, 364.25, 366.0, 367.75, 369.5, 371.25, 373.0,
+        374.75, 376.5, 378.25, 380.0, 381.75, 383.5, 385.25, 387.0, 388.75, 390.5, 392.25, 394.0,
+        395.75, 397.5, 399.25, 401.0, 402.75, 404.5, 406.25, 408.0, 409.75, 411.5, 413.25, 415.0,
+        416.75, 418.5, 420.25, 422.0, 423.75,
+    ];
+
+    // TODO verify inplace vector with C implementation!
+    const TEST_VECTOR2: &[f32; N] = &[
+        192.0, 193.00005, 194.00035, 195.00134, 320.5, 322.25, 324.0, 325.75, 327.5, 329.25, 331.0,
+        332.75, 334.5, 336.25, 338.0, 339.75, 341.5, 343.25, 345.0, 346.75, 348.5, 350.25, 352.0,
+        353.75, 355.5, 357.25, 359.0, 360.75, 362.5, 364.25, 366.00003, 367.75018, 381.60532,
+        403.69452, 434.27197, 456.65555, 471.0, 473.3125, 475.625, 477.9375, 480.25, 482.5625,
+        484.875, 487.1875, 489.5, 491.8125, 494.125, 496.4375, 498.75, 501.0625, 503.375, 505.6875,
+        508.0, 510.3125, 512.625, 514.9375, 517.25, 519.5625, 521.875, 524.1875, 527.677, 533.9376,
+        545.14777, 560.8071,
     ];
 
     #[test]
@@ -217,7 +252,7 @@ mod tests {
         );
 
         (0..N).into_iter().for_each(|i| {
-            assert!((output[offset + i] - TEST_VECTOR[i]).abs() < (TEST_VECTOR[i] * 0.01));
+            assert!((output[offset + i] - TEST_VECTOR1[i]).abs() < f32::EPSILON);
         });
     }
 
@@ -233,7 +268,7 @@ mod tests {
         comb_filter_inplace(&mut output, offset, T0, T1, N, G0, G1, 0, 0, OVERLAP);
 
         (0..N).into_iter().for_each(|i| {
-            assert!((output[offset + i] - TEST_VECTOR[i]).abs() < (TEST_VECTOR[i] * 0.01));
+            assert!((output[offset + i] - TEST_VECTOR2[i]).abs() < f32::EPSILON);
         });
     }
 }
