@@ -23,7 +23,7 @@ jobs:
           cargo fmt --all -- --check
       - name: Check lints
         run: |
-          cargo clippy --all-features -- -D warnings
+          cargo clippy -- -D warnings
 
   test:
     runs-on: ${{ matrix.os }}
