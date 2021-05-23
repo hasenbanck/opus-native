@@ -39,6 +39,8 @@ If you need these Opus features, you must stick to the reference implementation.
 This crate enables SIMD intrinsics for the x86 and x86_64 targets on the stable Rust compiler for
 SSE automatically.
 
+AVX optimizations are available. You need to compile with the `avx` target feature to enable these.
+
 If you wish to use SIMD intrinsics on non x86 and x86_64 platforms, you need to use the `nightly`
 feature described below.
 
