@@ -30,6 +30,7 @@ pub(crate) fn comb_filter_const(
         (0..n - 3).into_iter().step_by(4).for_each(|i| {
             let yi = vld1q_f32(x[x_offset + i..].as_ptr());
 
+            // FIXME could be optimized if "vextq_f32" is available in std::arch.
             let xp = x_offset + i - t - 2;
             let x1v = vld1q_f32(x[xp + 1..].as_ptr());
             let x2v = vld1q_f32(x[xp + 2..].as_ptr());
@@ -68,6 +69,7 @@ pub(crate) fn comb_filter_const_inplace(
         (0..n - 3).into_iter().step_by(4).for_each(|i| {
             let yi = vld1q_f32(y[y_offset + i..].as_ptr());
 
+            // FIXME could be optimized if "vextq_f32" is available in std::arch.
             let yp = y_offset + i - t - 2;
             let x1v = vld1q_f32(y[yp + 1..].as_ptr());
             let x2v = vld1q_f32(y[yp + 2..].as_ptr());
