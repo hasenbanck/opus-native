@@ -26,11 +26,11 @@ pub(crate) fn comb_filter_const(
         (0..n - 3).into_iter().step_by(4).for_each(|i| {
             let yi = vld1q_f32(x[x_offset + i..].as_ptr());
 
-            let yp = y_offset + i - t - 2;
-            let x1v = vld1q_f32(y[yp + 1..].as_ptr());
-            let x2v = vld1q_f32(y[yp + 2..].as_ptr());
-            let x3v = vld1q_f32(y[yp + 3..].as_ptr());
-            let x4v = vld1q_f32(y[yp + 4..].as_ptr());
+            let xp = x_offset + i - t - 2;
+            let x1v = vld1q_f32(x[xp + 1..].as_ptr());
+            let x2v = vld1q_f32(x[xp + 2..].as_ptr());
+            let x3v = vld1q_f32(x[xp + 3..].as_ptr());
+            let x4v = vld1q_f32(x[xp + 4..].as_ptr());
 
             let yi = vaddq_f32(yi, vmulq_f32(g10v, x2v));
 
