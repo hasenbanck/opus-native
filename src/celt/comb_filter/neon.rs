@@ -1,3 +1,4 @@
+//! NEON optimized version.
 #[cfg(target_arch = "aarch64")]
 use std::arch::aarch64::*;
 #[cfg(target_arch = "arm")]
