@@ -4,6 +4,9 @@ use std::arch::aarch64::*;
 #[cfg(target_arch = "arm")]
 use std::arch::arm::*;
 
+// Pretty naive conversion from the SSE version.
+// Around 5-10% speedup on RPi4 compared to the fallback.
+
 #[inline(always)]
 #[allow(unsafe_code)]
 #[allow(clippy::too_many_arguments)]
