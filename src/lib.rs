@@ -1,9 +1,11 @@
+#![cfg_attr(feature = "nightly", feature(stdsimd))]
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
 #![deny(clippy::panic)]
 #![deny(clippy::unwrap_used)]
 // FIXME only temporary until the main library calls are implemented.
 #![allow(unused)]
+
 //! Implements the free and open audio codec Opus in Rust.
 //!
 //! The Opus codec is designed for interactive speech and audio transmission over the Internet.
@@ -25,10 +27,18 @@
 //! * Frame sizes from 2.5 ms to 60 ms
 //! * Good loss robustness and packet loss concealment (PLC)
 //!
+
 pub use decoder::*;
 pub use encoder::*;
 pub use encoder::*;
 pub use error::*;
+
+macro_rules! submodule {
+  ($v:vis $name:ident) => {
+    mod $name;
+    $v use $name::*;
+  };
+}
 
 pub(crate) mod celt;
 mod decoder;
@@ -118,6 +128,18 @@ pub enum SamplingRate {
     Hz24000 = 24000,
     /// 48 kHz
     Hz48000 = 48000,
+}
+
+impl SamplingRate {
+    fn resampling_factor(self) -> u32 {
+        match self {
+            SamplingRate::Hz48000 => 1,
+            SamplingRate::Hz24000 => 2,
+            SamplingRate::Hz16000 => 3,
+            SamplingRate::Hz12000 => 4,
+            SamplingRate::Hz8000 => 6,
+        }
+    }
 }
 
 /// Audio bandwidth.

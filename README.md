@@ -21,7 +21,7 @@ This crate is under heavy development. Most functionality is not working.
 * Multistream decoder
 * Multistream encoder
 
-## Not supported features
+## Not supported Opus features
 
 To decrease the implementation complexity, we don't support the following rarely used features:
 
@@ -32,7 +32,20 @@ To decrease the implementation complexity, we don't support the following rarely
   programs, leads to worse encoding quality and is extremely rarely used, we decided to not support
   this optional feature.
 
-If you need these features, you must stick to the reference implementation.
+If you need these Opus features, you must stick to the reference implementation.
+
+## Target feature optimization
+
+This crate enables SIMD intrinsics for the x86 and x86_64 targets on the stable Rust compiler for
+SSE automatically.
+
+If you wish to use SIMD intrinsics on non x86 and x86_64 platforms, you need to use the `nightly`
+feature described below.
+
+## Crate features
+
+* `nightly` - Enables target specific SIMD intrinsics that are only currently available on the
+  nightly Rust compiler. Affected target features: `neon` for `arm` / `aarch64`
 
 ## Credits
 
