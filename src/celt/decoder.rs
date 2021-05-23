@@ -1,6 +1,5 @@
 //! Implements the Celt decoder.
 
-use crate::celt::mode;
 use crate::range_coder::RangeDecoder;
 use crate::{Channels, OpusError, SamplingRate};
 

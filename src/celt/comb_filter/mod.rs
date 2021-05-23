@@ -8,19 +8,19 @@ use crate::celt::mode;
     all(target_arch = "arm", target_feature = "neon", feature = "nightly"),
     all(target_arch = "aarch64", target_feature = "neon", feature = "nightly")
 )))]
-submodule!(pub fallback);
+submodule!(pub(crate) fallback);
 
 #[cfg(any(
     all(target_arch = "x86", target_feature = "sse"),
     all(target_arch = "x86_64", target_feature = "sse")
 ))]
-submodule!(pub sse);
+submodule!(pub(crate) sse);
 
 #[cfg(any(
     all(target_arch = "arm", target_feature = "neon", feature = "nightly"),
     all(target_arch = "aarch64", target_feature = "neon", feature = "nightly")
 ))]
-submodule!(pub neon);
+submodule!(pub(crate) neon);
 
 const COMBFILTER_MINPERIOD: usize = 15;
 

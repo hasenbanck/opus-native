@@ -512,7 +512,7 @@ impl DecoderInner {
 
             (None, audiosize, mode, bandwidth)
         } else {
-            let mut dec = data.as_ref().map(|data| RangeDecoder::new(data));
+            let dec = data.as_ref().map(|data| RangeDecoder::new(data));
             (dec, self.frame_size, self.mode, self.bandwidth)
         };
 
@@ -813,7 +813,7 @@ impl DecoderInner {
         data: &Option<&[u8]>,
         len: u32,
         redundancy_bytes: u32,
-        mut redundant_range: &mut u32,
+        redundant_range: &mut u32,
         frame_size: usize,
     ) {
         self.celt_dec.set_start_band(0);
