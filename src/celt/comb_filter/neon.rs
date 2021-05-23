@@ -76,11 +76,8 @@ pub(crate) fn comb_filter_const_inplace(
             let yi = vaddq_f32(yi, vmulq_f32(g12v, vaddq_f32(x4v, x0v)));
 
             x0v = x4v;
-            let (x0, x1, x2, x3): (f32, f32, f32, f32) = std::mem::transmute(yi);
-            y[y_offset + i] = x0;
-            y[y_offset + i + 1] = x1;
-            y[y_offset + i + 2] = x2;
-            y[y_offset + i + 3] = x3;
+            let yi: [f32; 4] = std::mem::transmute(yi);
+            y[y_offset + i..y_offset + i + 4].copy_from_slice(&yi);
         });
     }
 }
