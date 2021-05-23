@@ -43,6 +43,8 @@ pub(crate) fn comb_filter_const(
             let yi = vaddq_f32(yi, vmulq_f32(g12v, vaddq_f32(x4v, x0v)));
 
             x0v = x4v;
+
+            // FIXME use vst1q_f32 once exposed by std::arch.
             let yi: [f32; 4] = std::mem::transmute(yi);
             y[y_offset + i..y_offset + i + 4].copy_from_slice(&yi);
         });
@@ -82,6 +84,8 @@ pub(crate) fn comb_filter_const_inplace(
             let yi = vaddq_f32(yi, vmulq_f32(g12v, vaddq_f32(x4v, x0v)));
 
             x0v = x4v;
+
+            // FIXME use vst1q_f32 once exposed by std::arch.
             let yi: [f32; 4] = std::mem::transmute(yi);
             y[y_offset + i..y_offset + i + 4].copy_from_slice(&yi);
         });
