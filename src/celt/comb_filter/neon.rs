@@ -37,10 +37,9 @@ pub(crate) fn comb_filter_const(
             let x2v = vextq_f32(x0v, x4v, 2);
             let x3v = vextq_f32(x0v, x4v, 3);
 
-            let yi = vaddq_f32(yi, vmulq_f32(g10v, x2v));
-
-            let yi = vaddq_f32(yi, vmulq_f32(g11v, vaddq_f32(x3v, x1v)));
-            let yi = vaddq_f32(yi, vmulq_f32(g12v, vaddq_f32(x4v, x0v)));
+            let yi = vfmaq_f32(yi, g10v, x2v));
+            let yi = vfmaq_f32(yi, g11v, vaddq_f32(x3v, x1v));
+            let yi = vfmaq_f32(yi, g12v, vaddq_f32(x4v, x0v));
 
             x0v = x4v;
 
@@ -78,10 +77,9 @@ pub(crate) fn comb_filter_const_inplace(
             let x2v = vextq_f32(x0v, x4v, 2);
             let x3v = vextq_f32(x0v, x4v, 3);
 
-            let yi = vaddq_f32(yi, vmulq_f32(g10v, x2v));
-
-            let yi = vaddq_f32(yi, vmulq_f32(g11v, vaddq_f32(x3v, x1v)));
-            let yi = vaddq_f32(yi, vmulq_f32(g12v, vaddq_f32(x4v, x0v)));
+            let yi = vfmaq_f32(yi, g10v, x2v));
+            let yi = vfmaq_f32(yi, g11v, vaddq_f32(x3v, x1v));
+            let yi = vfmaq_f32(yi, g12v, vaddq_f32(x4v, x0v));
 
             x0v = x4v;
 
