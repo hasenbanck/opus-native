@@ -18,6 +18,8 @@ pub(crate) fn comb_filter_const(
     g11: f32,
     g12: f32,
 ) {
+    debug_assert_eq!(n % 8, 0);
+
     unsafe {
         let g10v = _mm256_set1_ps(g10);
         let g11v = _mm256_set1_ps(g11);
@@ -96,7 +98,7 @@ pub(crate) fn comb_filter_const_inplace(
     g11: f32,
     g12: f32,
 ) {
-    // TODO is N always n%8==0? If so, we can remove the SSE code below.
+    debug_assert_eq!(n % 8, 0);
 
     unsafe {
         let g10v = _mm256_set1_ps(g10);
