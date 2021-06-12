@@ -25,7 +25,7 @@ This crate is under heavy development. Most functionality is not working.
 
 To decrease the implementation complexity, we don't support the following rarely used features:
 
-* Fixed point arithmetic - Only float point arithmetic is supported
+* Fixed point arithmetic - This library only supports float point arithmetic
   (only affects cheap MCU without proper floating point support).
 * Custom modes - The Opus specification allows the usage of custom modes (custom sample rates or
   custom frame sizes) as an optional feature. Since this breaks the compatibility with other
@@ -39,7 +39,10 @@ If you need these Opus features, you must stick to the reference implementation.
 This crate enables SIMD intrinsics for the x86 and x86_64 targets on the stable Rust compiler for
 SSE automatically.
 
-AVX optimizations are available. You need to compile with the `avx` target feature to enable these.
+You can activate the following x86 / x86_64 target features for further optimizations:
+
+* `avx`
+* `fma`
 
 If you wish to use SIMD intrinsics on non x86 and x86_64 platforms, you need to use the `nightly`
 feature described below.
