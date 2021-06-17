@@ -1,10 +1,9 @@
 use std::f32::consts::{LN_2, LOG2_E, PI};
-use std::mem::size_of;
 
 /// The minimum number of bits required to store a positive integer in binary, or 0 for a non-positive integer.
 #[inline(always)]
 pub(crate) fn ilog(x: u32) -> u32 {
-    (size_of::<u32>() * 8) as u32 - x.leading_zeros()
+    u32::BITS - x.leading_zeros()
 }
 
 /// Fast version for log2.
