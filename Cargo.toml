@@ -16,4 +16,4 @@ ogg = []
 nightly = []
 
 [dev-dependencies]
-nanorand = { version = "0.5", default-features = true, features = ["wyrand"] }
+nanorand = { version = "0.6.1", default-features = true, features = ["wyrand"] }
